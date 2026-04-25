@@ -1,0 +1,98 @@
+# XcodeGen spec — generate the .xcodeproj from this file.
+#   brew install xcodegen
+#   cd ios && xcodegen
+#
+# After generating, open SpotifyFree.xcodeproj, select your Team under
+# "Signing & Capabilities", and edit the SPOTIFY_FREE_BACKEND_URL build setting
+# below (or via xcconfig) to point at your backend.
+name: SpotifyFree
+options:
+  bundleIdPrefix: com.spotifyfree
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_BITCODE: NO
+
+packages:
+  YouTubeKit:
+    url: https://github.com/alexeichhorn/YouTubeKit
+    from: "0.4.2"
+
+targets:
+  SpotifyFree:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SpotifyFree
+    resources:
+      - path: SpotifyFree/Persistence/SpotifyFree.xcdatamodeld
+    info:
+      path: SpotifyFree/Resources/Info.plist
+      properties:
+        UIBackgroundModes: [audio]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        SPOTIFY_FREE_BACKEND_URL: "$(SPOTIFY_FREE_BACKEND_URL)"
+        UIAppFonts:
+          - Fonts/DMSerifDisplay-Regular.ttf
+          - Fonts/DMSerifDisplay-Italic.ttf
+          - Fonts/Manrope-Regular.ttf
+          - Fonts/Manrope-Medium.ttf
+          - Fonts/Manrope-SemiBold.ttf
+          - Fonts/Manrope-Bold.ttf
+    entitlements:
+      path: SpotifyFree/Resources/SpotifyFree.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spotifyfree.SpotifyFree
+        INFOPLIST_FILE: SpotifyFree/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SpotifyFree/Resources/SpotifyFree.entitlements
+        # Production backend. Override per-scheme via xcconfig if doing local dev.
+        SPOTIFY_FREE_BACKEND_URL: "https://free-spotify.duckdns.org"
+    dependencies:
+      - package: YouTubeKit
+
+  SpotifyFreeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SpotifyFreeTests
+    dependencies:
+      - target: SpotifyFree
+
+  SpotifyFreeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SpotifyFreeUITests
+    dependencies:
+      - target: SpotifyFree
+
+schemes:
+  SpotifyFree:
+    build:
+      targets:
+        SpotifyFree: all
+        SpotifyFreeTests: [test]
+        SpotifyFreeUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [SpotifyFreeTests, SpotifyFreeUITests]
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,7 @@
+node_modules
+cache.db
+cache.db-journal
+cache.db-shm
+cache.db-wal
+.env
+*.log

@@ -1,0 +1,22 @@
+{
+  "name": "spotify-free-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "find test/unit -name '*.test.js' -print0 | xargs -0 node --test --test-reporter=spec",
+    "test:integration": "SPOTIFY_INTEGRATION=1 find test/integration -name '*.test.js' -print0 | xargs -0 node --test --test-reporter=spec",
+    "test:regression": "node test/regression/run.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.1",
+    "undici": "^6.21.0",
+    "youtubei.js": "^10.5.0"
+  }
+}

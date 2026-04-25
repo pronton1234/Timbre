@@ -1,0 +1,69 @@
+# Cobalt v11 self-hosted instance.
+#
+# Runs on the same Oracle ARM A1.Flex VM as the Node backend. The Node process
+# talks to Cobalt over the loopback on 127.0.0.1:9000; AVPlayer on the phone
+# talks to it over HTTPS through nginx at https://free-spotify.duckdns.org/
+# (routes /tunnel + /cobalt/).
+#
+# PO-token / visitor-data are pulled from the existing bgutil-ytdlp-pot-provider
+# container (ghcr name: brainicism/bgutil-ytdlp-pot-provider) that already runs
+# on this VM as a sidecar for yt-dlp. Cobalt's own validator accepts bgutil's
+# {poToken, contentBinding} response shape natively (see
+# /app/src/processing/helpers/youtube-session.js in the cobalt image).
+#
+# Why bgutil and NOT imputnet/yt-session-generator: the latter drives a real
+# Chromium against https://www.youtube.com/embed/jNQXAC9IVRw, but YouTube has
+# IP-gated the embed player UI for this VM's datacenter IP and returns
+# "Error 153 Video player configuration error", so the browser-driven flow
+# never produces the /youtubei/v1/player POST that contains the poToken.
+# bgutil bypasses that by running BotGuard's challenge JS directly against the
+# challenge endpoint — that endpoint is NOT IP-gated for us, so it works.
+#
+# Deploy:
+#   cd ~/spotify-free-backend/docker
+#   docker compose -f docker-compose.cobalt.yml up -d
+#   docker compose -f docker-compose.cobalt.yml logs -f
+#
+# Cookies: drop cookies.json (Cobalt format — JSON, NOT Netscape) into
+# ./cookies/cookies.json. See docker/README.md for the conversion.
+
+services:
+  cobalt-api:
+    image: ghcr.io/imputnet/cobalt:11
+    container_name: cobalt-api
+    restart: unless-stopped
+    # Bind only to loopback — nginx terminates TLS and reverse-proxies.
+    ports:
+      - "127.0.0.1:9000:9000"
+    # Use the default Docker bridge network (where bgutil-provider already runs)
+    # so we can talk to it directly at its bridge IP. Note: the default bridge
+    # does NOT do container-name DNS, so we hard-pin bgutil's IP below.
+    network_mode: bridge
+    environment:
+      API_URL: "https://free-spotify.duckdns.org/"
+      API_PORT: "9000"
+      COOKIE_PATH: "/cookies/cookies.json"
+      # PO-token sidecar. Cobalt POSTs {} to ${URL}/get_pot and reads
+      # poToken + contentBinding from the response (bgutil's native shape).
+      # 172.17.0.2 is bgutil-provider's IP on the default bridge — verify with
+      # `docker inspect bgutil-provider -f '{{.NetworkSettings.IPAddress}}'`
+      # if you ever recreate it.
+      YOUTUBE_SESSION_SERVER: "http://172.17.0.2:4416/"
+      # Rate limits: only our Node backend on 127.0.0.1 talks to the API bucket,
+      # but tunnel downloads are rate-limited separately and need to be generous
+      # because AVPlayer opens many parallel range requests.
+      RATELIMIT_WINDOW: "60"
+      RATELIMIT_MAX: "120"
+      TUNNEL_RATELIMIT_WINDOW: "60"
+      TUNNEL_RATELIMIT_MAX: "240"
+      API_AUTH_REQUIRED: "0"
+    volumes:
+      - ./cookies:/cookies:ro
+    mem_limit: 1g
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+

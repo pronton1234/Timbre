@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="22522" systemVersion="23A344" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="PlaylistEntity" representedClassName="PlaylistEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="coverArtURL" optional="YES" attributeType="URI"/>
+        <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <relationship name="tracks" toMany="YES" deletionRule="Cascade" destinationEntity="PlaylistTrackEntity" inverseName="playlist" inverseEntity="PlaylistTrackEntity"/>
+    </entity>
+    <entity name="PlaylistTrackEntity" representedClassName="PlaylistTrackEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="albumName" optional="YES" attributeType="String"/>
+        <attribute name="artistName" attributeType="String"/>
+        <attribute name="artworkUrl" optional="YES" attributeType="URI"/>
+        <attribute name="durationMs" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="isrc" optional="YES" attributeType="String"/>
+        <attribute name="itunesTrackId" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="position" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="playlist" maxCount="1" deletionRule="Nullify" destinationEntity="PlaylistEntity" inverseName="tracks" inverseEntity="PlaylistEntity"/>
+    </entity>
+    <entity name="LikedTrackEntity" representedClassName="LikedTrackEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="addedAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="albumName" optional="YES" attributeType="String"/>
+        <attribute name="artistName" attributeType="String"/>
+        <attribute name="artworkUrl" optional="YES" attributeType="URI"/>
+        <attribute name="durationMs" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="isrc" optional="YES" attributeType="String"/>
+        <attribute name="itunesTrackId" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String"/>
+    </entity>
+    <entity name="RecentlyPlayedEntity" representedClassName="RecentlyPlayedEntity" syncable="YES" codeGenerationType="class">
+        <attribute name="albumName" optional="YES" attributeType="String"/>
+        <attribute name="artistName" attributeType="String"/>
+        <attribute name="artworkUrl" optional="YES" attributeType="URI"/>
+        <attribute name="durationMs" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="isrc" optional="YES" attributeType="String"/>
+        <attribute name="itunesTrackId" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="playedAt" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+</model>
