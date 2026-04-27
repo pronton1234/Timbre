@@ -51,7 +51,7 @@ actor BackendClient {
         var attempt = 0
         while true {
             do {
-                var req = URLRequest(url: url, timeoutInterval: 15)
+                var req = URLRequest(url: url, timeoutInterval: 5)
                 req.setValue("application/json", forHTTPHeaderField: "Accept")
                 let (data, resp) = try await session.data(for: req)
                 guard let http = resp as? HTTPURLResponse else { throw BackendError.badResponse(-1, "no http") }

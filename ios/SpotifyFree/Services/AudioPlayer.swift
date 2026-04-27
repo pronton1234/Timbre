@@ -4,6 +4,36 @@ import MediaPlayer
 import Combine
 import UIKit
 
+// MARK: - Resolver protocols (used for dependency injection in tests)
+
+protocol VideoIdResolving: Sendable {
+    /// Fetch a YouTube videoId for the given track via network (no caching at this layer).
+    func resolveVideoId(for track: Track) async throws -> String
+}
+
+protocol StreamURLResolving: Sendable {
+    func resolveURL(videoId: String, bypassCache: Bool) async throws -> URL
+}
+
+// MARK: - Default implementations
+
+/// Calls the backend directly. VideoIdCache is checked upstream in AudioPlayer.
+private struct DefaultVideoIdResolver: VideoIdResolving {
+    func resolveVideoId(for track: Track) async throws -> String {
+        let matched = try await BackendClient.shared.matchVideoId(track: track)
+        return matched.videoId
+    }
+}
+
+/// Thin wrapper so StreamResolver (actor) conforms to StreamURLResolving.
+private struct DefaultStreamResolver: StreamURLResolving {
+    func resolveURL(videoId: String, bypassCache: Bool) async throws -> URL {
+        try await StreamResolver.shared.resolveURL(videoId: videoId, bypassCache: bypassCache)
+    }
+}
+
+// MARK: - AudioPlayer
+
 /// Single long-lived `AVQueuePlayer` — using the queue variant lets us
 /// preroll the next track's `AVPlayerItem` ahead of time for ~0ms skip latency.
 @MainActor
@@ -29,12 +59,20 @@ final class AudioPlayer: ObservableObject {
     private var bufferEmptyObs: AnyCancellable?
     private var bufferReadyObs: AnyCancellable?
     private var prewarmed: (trackId: Int, item: AVPlayerItem, videoId: String)?
-    /// Seconds. Preferred source for UI duration; comes from `Track.durationMs`
-    /// (accurate, from iTunes), falling back to `AVPlayerItem.duration` only
-    /// when the track-supplied value is missing.
     private var trackDurationSeconds: TimeInterval = 0
 
-    private init() {
+    private let videoIdResolver: VideoIdResolving
+    private let streamResolver: StreamURLResolving
+
+    // MARK: - Init
+
+    private convenience init() {
+        self.init(videoIdResolver: DefaultVideoIdResolver(), streamResolver: DefaultStreamResolver())
+    }
+
+    init(videoIdResolver: VideoIdResolving, streamResolver: StreamURLResolving) {
+        self.videoIdResolver = videoIdResolver
+        self.streamResolver = streamResolver
         player.automaticallyWaitsToMinimizeStalling = false
         registerRemoteCommands()
         observePlayer()
@@ -42,17 +80,10 @@ final class AudioPlayer: ObservableObject {
 
     // MARK: - Public API
 
-    /// Replace the currently-playing item with a newly-resolved track.
-    /// If a pre-warmed item is queued for this trackId, promote it instead of
-    /// resolving again — this is the hot path (~0 ms).
     func play(_ track: Track) async {
         RecentPlaysStore.shared.recordPlay(track)
         // Hot path: use pre-warmed AVPlayerItem
         if let pw = prewarmed, pw.trackId == track.itunesTrackId {
-            // If the prewarmed item is already the AVQueuePlayer's currentItem
-            // (because `prewarm()` inserted it and AVQueuePlayer auto-advanced
-            // to it after the previous track ended), don't rebuild the queue —
-            // just update bookkeeping and keep playback running.
             if let current = player.currentItem, current === pw.item {
                 currentTrack = track
                 currentVideoId = pw.videoId
@@ -80,14 +111,14 @@ final class AudioPlayer: ObservableObject {
         }
 
         do {
-            let matched = try await BackendClient.shared.matchVideoId(track: track)
-            let streamUrl = try await StreamResolver.shared.resolveURL(videoId: matched.videoId)
+            let videoId = try await resolveVideoId(for: track)
+            let streamUrl = try await streamResolver.resolveURL(videoId: videoId, bypassCache: false)
             let item = AVPlayerItem(asset: AVURLAsset(url: streamUrl))
-            item.preferredForwardBufferDuration = 5 // start playing ~500ms sooner
+            item.preferredForwardBufferDuration = 5
             player.removeAllItems()
             player.insert(item, after: nil)
             currentTrack = track
-            currentVideoId = matched.videoId
+            currentVideoId = videoId
             trackDurationSeconds = TimeInterval(track.durationMs) / 1000.0
             duration = trackDurationSeconds
             observeCurrentItem()
@@ -99,18 +130,14 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    /// Resolve the next track and attach its `AVPlayerItem` to the queue so
-    /// `AVPlayer` can start buffering it immediately.
     func prewarm(_ track: Track) async {
-        // Skip if already prewarmed for this track
         if prewarmed?.trackId == track.itunesTrackId { return }
         do {
-            let matched = try await BackendClient.shared.matchVideoId(track: track)
-            let streamUrl = try await StreamResolver.shared.resolveURL(videoId: matched.videoId)
+            let videoId = try await resolveVideoId(for: track)
+            let streamUrl = try await streamResolver.resolveURL(videoId: videoId, bypassCache: false)
             let item = AVPlayerItem(asset: AVURLAsset(url: streamUrl))
             item.preferredForwardBufferDuration = 5
-            prewarmed = (track.itunesTrackId, item, matched.videoId)
-            // Attach so AVPlayer pre-buffers proactively
+            prewarmed = (track.itunesTrackId, item, videoId)
             if player.canInsert(item, after: nil) {
                 player.insert(item, after: nil)
             }
@@ -123,9 +150,6 @@ final class AudioPlayer: ObservableObject {
     func pause() { player.pause(); isPlaying = false; updateNowPlayingInfo() }
     func togglePlayPause() { isPlaying ? pause() : resume() }
 
-    /// Rewind the current AVPlayerItem to 0 and keep playing — the canonical
-    /// "repeat one" primitive. Does NOT re-resolve the stream, does NOT touch
-    /// the queue, and does NOT fight the prewarmed-item bookkeeping.
     func restart() {
         position = 0
         let zero = CMTime.zero
@@ -139,10 +163,6 @@ final class AudioPlayer: ObservableObject {
     }
 
     func seek(to seconds: TimeInterval) {
-        // Optimistically update the published position so the slider binding
-        // doesn't snap back to the pre-seek value while AVPlayer finishes the
-        // seek asynchronously. Use tolerance zero for exact positioning; the
-        // periodic observer will pick up forward progress from here.
         let clamped = max(0, min(seconds, max(duration, 0)))
         position = clamped
         let target = CMTime(seconds: clamped, preferredTimescale: 1000)
@@ -151,16 +171,29 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    // MARK: - Resolution (VideoIdCache → resolver → cache write)
+
+    /// Check on-device VideoIdCache first; only call the injected resolver on a miss.
+    /// This ensures the resolver is bypassed for repeat plays — and in tests,
+    /// seeding VideoIdCache will prevent mock/real resolvers from being called.
+    private func resolveVideoId(for track: Track) async throws -> String {
+        if let cached = await VideoIdCache.shared.get(track.itunesTrackId) {
+            return cached
+        }
+        let videoId = try await videoIdResolver.resolveVideoId(for: track)
+        await VideoIdCache.shared.set(track.itunesTrackId, videoId: videoId)
+        return videoId
+    }
+
     // MARK: - Observers
 
     private func observePlayer() {
-        periodicObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 1000), queue: .main) { [weak self] t in
+        periodicObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 1000), queue: .main
+        ) { [weak self] t in
             Task { @MainActor in
                 guard let self else { return }
                 self.position = t.seconds
-                // Prefer the track's iTunes-reported duration (accurate for
-                // YouTube-resolved streams, whose AVPlayerItem.duration is
-                // often infinite, NaN, or includes ad padding).
                 if self.trackDurationSeconds > 0 {
                     self.duration = self.trackDurationSeconds
                 } else if let item = self.player.currentItem {
@@ -169,10 +202,6 @@ final class AudioPlayer: ObservableObject {
                 }
             }
         }
-
-        // NOTE: the end-of-track observer is attached per-item in
-        // `observeCurrentItem()` so it fires for the actual current item
-        // (not the prewarmed pre-buffer).
 
         stallObs = NotificationCenter.default
             .publisher(for: AVPlayerItem.playbackStalledNotification)
@@ -198,9 +227,6 @@ final class AudioPlayer: ObservableObject {
         bufferReadyObs = item.publisher(for: \.isPlaybackLikelyToKeepUp)
             .receive(on: RunLoop.main)
             .sink { [weak self] ready in if ready { self?.isBuffering = false } }
-        // Item-scoped end observer — fires only for THIS currentItem, not for
-        // the prewarmed pre-buffered next item (which would otherwise trigger
-        // a phantom advance and break repeat/autoplay).
         endObs = NotificationCenter.default
             .publisher(for: .AVPlayerItemDidPlayToEndTime, object: item)
             .receive(on: RunLoop.main)
@@ -210,11 +236,8 @@ final class AudioPlayer: ObservableObject {
             }
     }
 
-    /// googlevideo stream URLs expire after ~6 hours. If the current item
-    /// fails or stalls indefinitely and we have a videoId, refresh and resume.
     private func handlePossibleStreamExpiry() {
         guard let videoId = currentVideoId, let item = player.currentItem else { return }
-        // Only attempt refresh if the item has actually failed or its url is unreachable
         if let err = item.error as NSError? {
             let refreshableCodes: Set<Int> = [-11828, -11829, -1001, -1009]
             if !refreshableCodes.contains(err.code) { return }
@@ -223,15 +246,13 @@ final class AudioPlayer: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                // Bypass the on-device cache: the cached URL is exactly the one
-                // that just failed. This forces YouTubeKit to re-extract.
-                let fresh = try await StreamResolver.shared.resolveURL(videoId: videoId, bypassCache: true)
+                let fresh = try await self.streamResolver.resolveURL(videoId: videoId, bypassCache: true)
                 let new = AVPlayerItem(asset: AVURLAsset(url: fresh))
                 new.preferredForwardBufferDuration = 5
                 self.player.removeAllItems()
                 self.player.insert(new, after: nil)
                 self.observeCurrentItem()
-                self.player.seek(to: CMTime(seconds: offset, preferredTimescale: 1000), completionHandler: { _ in })
+                self.player.seek(to: CMTime(seconds: offset, preferredTimescale: 1000)) { _ in }
                 self.player.play()
             } catch {
                 print("Stream refresh failed: \(error)")
@@ -298,7 +319,6 @@ final class AudioPlayer: ObservableObject {
             }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        // isPlaying is kept in sync with time control status as a fallback
         isPlaying = player.timeControlStatus == .playing
     }
 }

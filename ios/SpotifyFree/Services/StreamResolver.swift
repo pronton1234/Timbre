@@ -3,19 +3,17 @@ import YouTubeKit
 
 /// On-device YouTube stream-URL resolver.
 ///
-/// Takes a `videoId` (produced by the backend's iTunes→YouTube match step) and
-/// returns a directly-playable `*.googlevideo.com/videoplayback` URL.
+/// Takes a `videoId` and returns a directly-playable `*.googlevideo.com/videoplayback` URL.
 ///
 /// Why this lives on the phone: YouTube IP-gates its stream endpoint for
-/// datacenter IPs (Oracle Cloud, AWS, GCP, Azure). Major-label US tracks return
-/// `Sign in to confirm you're not a bot` when extraction runs on our VM. From a
-/// residential/mobile IP (the user's phone), the same request succeeds because
-/// YouTube's anti-bot heuristics treat the mobile client as a real viewer.
+/// datacenter IPs (Oracle Cloud, AWS, GCP, Azure). From a residential/mobile
+/// IP the same request succeeds because YouTube's anti-bot heuristics treat
+/// the mobile client as a real viewer.
 ///
-/// Caches resolved URLs in a small in-process LRU so repeated plays of the same
-/// track within a session don't re-hit YouTube. URLs are tied to
-/// googlevideo's ~6h signature lifetime, so we treat the cache as a 30-min TTL
-/// (conservative — well below the expiry).
+/// Cache: 300 entries, 5-hour TTL (googlevideo URLs are signed for ~6h).
+/// Persisted to UserDefaults so entries survive app restarts — the most
+/// expensive operation (YouTubeKit extraction) is only needed once per song
+/// per ~5h window.
 actor StreamResolver {
     static let shared = StreamResolver()
 
@@ -30,17 +28,19 @@ actor StreamResolver {
     }
 
     private var cache: [String: Entry] = [:]
-    private let cacheTTL: TimeInterval = 30 * 60  // 30 minutes
-    private let cacheLimit = 32
+    private let cacheTTL: TimeInterval = 5 * 60 * 60   // 5 hours
+    private let cacheLimit = 300
+    private let udKey = "streamResolverCache.v1"
 
-    private init() {}
+    private init() {
+        loadFromDisk()
+    }
 
-    /// Resolve a video ID to a playable stream URL.
-    /// - Parameters:
-    ///   - videoId: YouTube video identifier.
-    ///   - bypassCache: force a fresh extraction (used after mid-stream URL expiry).
+    // MARK: - Public API
+
     func resolveURL(videoId: String, bypassCache: Bool = false) async throws -> URL {
-        if !bypassCache, let entry = cache[videoId], Date().timeIntervalSince(entry.resolvedAt) < cacheTTL {
+        if !bypassCache, let entry = cache[videoId],
+           Date().timeIntervalSince(entry.resolvedAt) < cacheTTL {
             return entry.url
         }
 
@@ -48,8 +48,7 @@ actor StreamResolver {
         do {
             let streams = try await yt.streams
             // AVPlayer only decodes AAC/m4a natively — filter out Opus/webm streams
-            // that would crash mediaserverd (err=-12860). `isNativelyPlayable` checks
-            // both audio+video codecs against AVPlayer's supported set.
+            // that would crash mediaserverd (err=-12860).
             let playable = streams.filterAudioOnly().filter { $0.isNativelyPlayable }
             guard let audio = playable.highestAudioBitrateStream() else {
                 throw ResolveError.noAudioStream
@@ -57,6 +56,7 @@ actor StreamResolver {
             let url = audio.url
             cache[videoId] = Entry(url: url, resolvedAt: Date())
             evictIfNeeded()
+            persistToDisk()
             return url
         } catch let err as ResolveError {
             throw err
@@ -65,18 +65,63 @@ actor StreamResolver {
         }
     }
 
-    /// Drop a single entry, e.g. after the current stream URL hits a 403.
     func invalidate(videoId: String) {
         cache.removeValue(forKey: videoId)
+        persistToDisk()
     }
+
+    // MARK: - Test support
+
+#if DEBUG
+    func injectCacheEntry(videoId: String, url: URL, resolvedAt: Date = Date()) {
+        cache[videoId] = Entry(url: url, resolvedAt: resolvedAt)
+        evictIfNeeded()
+    }
+
+    func clearCache() {
+        cache.removeAll()
+        UserDefaults.standard.removeObject(forKey: udKey)
+    }
+#endif
+
+    // MARK: - Private
 
     private func evictIfNeeded() {
         guard cache.count > cacheLimit else { return }
-        // Evict oldest entries
         let sorted = cache.sorted { $0.value.resolvedAt < $1.value.resolvedAt }
         let dropCount = cache.count - cacheLimit
         for (k, _) in sorted.prefix(dropCount) {
             cache.removeValue(forKey: k)
+        }
+    }
+
+    // MARK: - Persistence
+
+    private struct CodableEntry: Codable {
+        let videoId: String
+        let urlString: String
+        let resolvedAt: Date
+    }
+
+    private func persistToDisk() {
+        let entries = cache.map { (videoId, entry) in
+            CodableEntry(videoId: videoId, urlString: entry.url.absoluteString, resolvedAt: entry.resolvedAt)
+        }
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: udKey)
+        }
+    }
+
+    private func loadFromDisk() {
+        guard let data = UserDefaults.standard.data(forKey: udKey),
+              let entries = try? JSONDecoder().decode([CodableEntry].self, from: data) else { return }
+        let now = Date()
+        for e in entries {
+            // Skip expired entries — don't bother loading URLs that will just be
+            // evicted on first access anyway.
+            guard now.timeIntervalSince(e.resolvedAt) < cacheTTL,
+                  let url = URL(string: e.urlString) else { continue }
+            cache[e.videoId] = Entry(url: url, resolvedAt: e.resolvedAt)
         }
     }
 }

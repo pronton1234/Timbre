@@ -31,6 +31,8 @@ final class QueueManager: ObservableObject {
     /// Insert a track to play next — right after the current one.
     /// If nothing is playing yet, seed the queue and start at index 0 so the
     /// track begins playing immediately.
+    func playNext(_ track: Track) { addToQueue(track) }
+
     func addToQueue(_ track: Track) {
         let item = QueueItem(track)
         if queue.isEmpty {
