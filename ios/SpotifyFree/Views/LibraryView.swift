@@ -1,10 +1,6 @@
 import SwiftUI
 import CoreData
 
-/// Sleek dark Library:
-///   • H1 "Your Library"
-///   • Row of 2 gradient category tiles (Liked Songs purple, My Playlists blue)
-///   • Section "Playlists" — vertical list of real playlists
 struct LibraryView: View {
     @EnvironmentObject var queue: QueueManager
 
@@ -24,72 +20,101 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    HStack {
-                        Text("Your Library")
-                            .font(AppTheme.text(30, weight: .bold))
-                            .foregroundStyle(AppTheme.ink)
-                        Spacer()
-                        Button { showNewPlaylistSheet = true } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundStyle(AppTheme.ink)
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 48)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header
+                    Text("Your Library")
+                        .font(.display(40))
+                        .foregroundStyle(Color.mmForeground)
+                        .padding(.bottom, 32)
 
-                    HStack(spacing: 12) {
-                        categoryTile(
-                            gradient: AppTheme.likedGradient,
-                            icon: "heart.fill",
-                            title: "Liked Songs",
-                            count: "\(liked.count) \(liked.count == 1 ? "song" : "songs")",
-                            onTap: { showLiked = true }
-                        )
-                        NavigationLink {
-                            PlaylistsIndexView()
-                        } label: {
-                            categoryTile(
-                                gradient: AppTheme.playlistGradient,
-                                icon: "music.note.list",
-                                title: "My Playlists",
-                                count: "\(playlists.count) \(playlists.count == 1 ? "playlist" : "playlists")",
-                                onTap: {}
-                            )
+                    // Liked Songs
+                    Button { showLiked = true } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(LinearGradient(
+                                        colors: [Color.mmAccent.opacity(0.8), Color.mmAccent.opacity(0.4)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 48, height: 48)
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(Color.mmBackground)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Liked Songs")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(Color.mmForeground)
+                                Text("\(liked.count) \(liked.count == 1 ? "song" : "songs")")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.mmMutedFg)
+                            }
+                            Spacer()
                         }
-                        .buttonStyle(.plain)
+                        .padding(8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 16)
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 32)
 
+                    // Playlists
                     if !playlists.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Playlists")
-                                    .font(AppTheme.text(20, weight: .bold))
-                                    .foregroundStyle(AppTheme.ink)
+                        HStack {
+                            Text("PLAYLISTS")
+                                .font(.system(size: 11, weight: .regular))
+                                .tracking(2)
+                                .foregroundStyle(Color.mmMutedFg)
+                            Spacer()
+                            Button { showNewPlaylistSheet = true } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Color.mmMutedFg)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 12)
+
+                        VStack(spacing: 4) {
+                            ForEach(playlists) { pl in
+                                NavigationLink { PlaylistDetailView(playlist: pl) } label: {
+                                    playlistRow(pl)
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    } else {
+                        Button { showNewPlaylistSheet = true } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.mmSurface)
+                                        .frame(width: 48, height: 48)
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(Color.mmMutedFg)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("New Playlist")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(Color.mmForeground)
+                                    Text("Create your first playlist")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Color.mmMutedFg)
+                                }
                                 Spacer()
                             }
-                            .padding(.horizontal, 16)
-
-                            VStack(spacing: 0) {
-                                ForEach(playlists) { pl in
-                                    NavigationLink { PlaylistDetailView(playlist: pl) } label: {
-                                        playlistRow(pl)
-                                    }.buttonStyle(.plain)
-                                }
-                            }
+                            .padding(8)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
-
-                    Color.clear.frame(height: 160)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 56)
+                .padding(.bottom, 160)
             }
-            .background(AppTheme.bg.ignoresSafeArea())
+            .background(Color.clear)
             .navigationBarHidden(true)
             .sheet(isPresented: $showLiked) {
                 NavigationStack { LikedTracksView() }
@@ -98,61 +123,25 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Tiles
-
-    private func categoryTile(
-        gradient: LinearGradient,
-        icon: String,
-        title: String,
-        count: String,
-        onTap: @escaping () -> Void
-    ) -> some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading) {
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-                Spacer()
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(AppTheme.text(14, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(count)
-                        .font(AppTheme.text(11))
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 96)
-            .background(gradient)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-    }
-
     private func playlistRow(_ pl: PlaylistEntity) -> some View {
         HStack(spacing: 12) {
-            ArtworkView(url: pl.coverArtURL, size: 56, seedOverride: ArtTile.seed(from: pl.id?.uuidString ?? (pl.name ?? "p")))
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            ArtworkView(url: pl.coverArtURL, size: 48, seedOverride: ArtTile.seed(from: pl.id?.uuidString ?? (pl.name ?? "p")))
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
                 Text(pl.name ?? "Untitled")
-                    .font(AppTheme.text(15, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.mmForeground)
                     .lineLimit(1)
-                Text("\(pl.tracks?.count ?? 0) songs")
-                    .font(AppTheme.text(12))
-                    .foregroundStyle(AppTheme.ink2)
+                Text("Playlist · \(pl.tracks?.count ?? 0) tracks")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.mmMutedFg)
             }
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(8)
         .contentShape(Rectangle())
     }
-
-    // MARK: - New playlist sheet
 
     private var newPlaylistSheet: some View {
         NavigationStack {
@@ -167,55 +156,12 @@ struct LibraryView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
                         let name = newPlaylistName.trimmingCharacters(in: .whitespaces)
-                        if !name.isEmpty {
-                            PersistenceController.shared.createPlaylist(name: name)
-                        }
+                        if !name.isEmpty { PersistenceController.shared.createPlaylist(name: name) }
                         newPlaylistName = ""
                         showNewPlaylistSheet = false
                     }
                 }
             }
         }
-    }
-}
-
-/// Full-width list of all user playlists, opened from the "My Playlists"
-/// gradient tile.
-struct PlaylistsIndexView: View {
-    @FetchRequest(
-        entity: PlaylistEntity.entity(),
-        sortDescriptors: [NSSortDescriptor(keyPath: \PlaylistEntity.createdAt, ascending: false)]
-    ) private var playlists: FetchedResults<PlaylistEntity>
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                ForEach(playlists) { pl in
-                    NavigationLink { PlaylistDetailView(playlist: pl) } label: {
-                        HStack(spacing: 12) {
-                            ArtworkView(url: pl.coverArtURL, size: 56, seedOverride: ArtTile.seed(from: pl.id?.uuidString ?? (pl.name ?? "p")))
-                                .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(pl.name ?? "Untitled")
-                                    .font(AppTheme.text(15, weight: .semibold))
-                                    .foregroundStyle(AppTheme.ink)
-                                Text("\(pl.tracks?.count ?? 0) songs")
-                                    .font(AppTheme.text(12))
-                                    .foregroundStyle(AppTheme.ink2)
-                            }
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 16)
-        }
-        .background(AppTheme.bg.ignoresSafeArea())
-        .navigationTitle("My Playlists")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }

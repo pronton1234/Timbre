@@ -9,6 +9,7 @@ import CoreText
 /// someone regenerates Info.plist manually and drops the `UIAppFonts` key.
 enum FontLoader {
     private static let fileNames = [
+        "InstrumentSerif-Regular",
         "DMSerifDisplay-Regular",
         "DMSerifDisplay-Italic",
         "Manrope-Regular",

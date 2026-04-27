@@ -88,10 +88,10 @@ struct AlbumDetailView: View {
             } label: {
                 Text("Play")
                     .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Color.mmBackground)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 10)
-                    .background(Color.white)
+                    .background(Color.mmForeground)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)

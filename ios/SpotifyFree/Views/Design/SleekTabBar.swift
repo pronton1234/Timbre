@@ -1,70 +1,53 @@
 import SwiftUI
 
-/// Bottom tab bar matching the Sleek Music App reference:
-/// 4 tappable items (Home, Search, Library, Queue). The first 3 switch the
-/// selected `RootTab`; the 4th (Queue) triggers a modal via `onQueueTap`
-/// and does NOT select a tab.
 struct SleekTabBar: View {
     @Binding var selected: RootTab
-    var onQueueTap: () -> Void
+
+    private let tabs: [(tab: RootTab, icon: String, label: String)] = [
+        (.home,    "house",              "Home"),
+        (.search,  "magnifyingglass",    "Search"),
+        (.library, "books.vertical",     "Library"),
+        (.queue,   "list.bullet",        "Queue"),
+    ]
 
     var body: some View {
         HStack(spacing: 0) {
-            tabButton(tab: .home,    icon: "house.fill",             label: "Home")
-            tabButton(tab: .search,  icon: "magnifyingglass",        label: "Search")
-            tabButton(tab: .library, icon: "books.vertical.fill",    label: "Library")
-            queueButton
+            ForEach(tabs, id: \.tab) { item in
+                let isActive = selected == item.tab
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        selected = item.tab
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 20, weight: isActive ? .semibold : .regular))
+                        Text(item.label)
+                            .font(.system(size: 10, weight: isActive ? .medium : .regular))
+                    }
+                    .foregroundStyle(isActive ? Color.mmForeground : Color.mmMutedFg.opacity(0.7))
+                    .scaleEffect(isActive ? 1.1 : 1.0)
+                    .animation(.easeOut(duration: 0.2), value: isActive)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.top, 10)
+        .padding(.bottom, 24)
         .background(
             ZStack {
-                AppTheme.card.opacity(0.95)
-                Rectangle().fill(.ultraThinMaterial).opacity(0.6)
+                Color.mmSurface.opacity(0.85)
+                Rectangle().fill(.ultraThinMaterial)
             }
             .ignoresSafeArea(edges: .bottom)
         )
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(AppTheme.hair)
+                .fill(Color.mmBorder)
                 .frame(height: 0.5)
         }
-    }
-
-    @ViewBuilder
-    private func tabButton(tab: RootTab, icon: String, label: String) -> some View {
-        let isActive = (selected == tab)
-        Button {
-            selected = tab
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .regular))
-                Text(label)
-                    .font(AppTheme.text(11, weight: .medium))
-            }
-            .foregroundStyle(isActive ? AppTheme.ink : AppTheme.ink2)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var queueButton: some View {
-        Button(action: onQueueTap) {
-            VStack(spacing: 2) {
-                Image(systemName: "list.bullet")
-                    .font(.system(size: 22, weight: .regular))
-                Text("Queue")
-                    .font(AppTheme.text(11, weight: .medium))
-            }
-            .foregroundStyle(AppTheme.ink2)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }

@@ -1,138 +1,152 @@
 import SwiftUI
 
-/// Sleek dark queue modal:
-///   • Chevron-down header + "Queue" title
-///   • "NOW PLAYING" card
-///   • "NEXT UP" draggable list with always-visible grip handles
-struct QueueView: View {
-    @EnvironmentObject var queue: QueueManager
-    var onDismiss: () -> Void = {}
+// MARK: - Animated Equalizer
+
+private struct AnimatedEqualizer: View {
+    let isPlaying: Bool
+    let color: Color
 
     var body: some View {
-        ZStack {
-            AppTheme.fullPlayerBg.ignoresSafeArea()
+        TimelineView(.animation(minimumInterval: 0.12, paused: !isPlaying)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(0..<4, id: \.self) { i in
+                    let fraction: Double = isPlaying
+                        ? 0.4 + 0.6 * abs(sin(t * 4 + Double(i) * 0.7))
+                        : 0.25
+                    Capsule()
+                        .fill(color)
+                        .frame(width: 3)
+                        .frame(height: 20 * fraction, alignment: .bottom)
+                        .animation(.easeInOut(duration: 0.12), value: fraction)
+                }
+            }
+            .frame(width: 22, height: 20, alignment: .bottom)
+        }
+    }
+}
 
-            VStack(spacing: 0) {
-                header
+// MARK: - QueueView
 
-                List {
-                    if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
-                        Section {
-                            nowPlayingCard(queue.queue[queue.currentIndex].track)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        } header: {
-                            sectionLabel("NOW PLAYING")
+struct QueueView: View {
+    @EnvironmentObject var queue: QueueManager
+    @EnvironmentObject var player: AudioPlayer
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Header
+                Text("UP NEXT")
+                    .font(.system(size: 11, weight: .regular))
+                    .tracking(2)
+                    .foregroundStyle(Color.mmMutedFg)
+                    .padding(.bottom, 4)
+
+                Text("Queue")
+                    .font(.display(40))
+                    .foregroundStyle(Color.mmForeground)
+                    .padding(.bottom, 32)
+
+                // Now Playing
+                if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
+                    Text("NOW PLAYING")
+                        .font(.system(size: 11, weight: .regular))
+                        .tracking(2)
+                        .foregroundStyle(Color.mmMutedFg)
+                        .padding(.bottom, 12)
+
+                    let nowTrack = queue.queue[queue.currentIndex].track
+                    HStack(spacing: 12) {
+                        ArtworkView(url: nowTrack.artworkUrl, size: 56)
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(nowTrack.name)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Color.mmBackground)
+                                .lineLimit(1)
+                            Text(nowTrack.artistName)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.mmBackground.opacity(0.6))
+                                .lineLimit(1)
                         }
-                    }
 
-                    if queue.currentIndex + 1 < queue.queue.count {
-                        Section {
-                            ForEach(Array(queue.queue.enumerated()).filter { $0.offset > queue.currentIndex }, id: \.element.id) { pair in
-                                upcomingRow(pair.element.track)
-                                    .listRowBackground(Color.clear)
-                                    .listRowSeparator(.hidden)
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                            }
-                            .onMove(perform: handleMove)
-                            .onDelete(perform: handleDelete)
-                        } header: {
-                            sectionLabel("NEXT UP")
+                        Spacer()
+
+                        AnimatedEqualizer(isPlaying: player.isPlaying, color: Color.mmBackground)
+                    }
+                    .padding(12)
+                    .background(Color.mmForeground)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.bottom, 32)
+                }
+
+                // Next in Queue
+                let upcoming = queue.queue.enumerated().filter { $0.offset > queue.currentIndex }
+                if !upcoming.isEmpty {
+                    Text("NEXT IN QUEUE")
+                        .font(.system(size: 11, weight: .regular))
+                        .tracking(2)
+                        .foregroundStyle(Color.mmMutedFg)
+                        .padding(.bottom, 12)
+
+                    VStack(spacing: 4) {
+                        ForEach(Array(upcoming), id: \.element.id) { (offset, item) in
+                            queueRow(item.track, displayIndex: offset - queue.currentIndex)
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .environment(\.editMode, .constant(.active))
+
+                if queue.queue.isEmpty {
+                    Text("Your queue is empty.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.mmMutedFg)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 64)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 56)
+            .padding(.bottom, 160)
         }
+        .background(Color.clear)
     }
 
-    // MARK: Header
-
-    private var header: some View {
-        HStack {
-            Button(action: onDismiss) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                    .frame(width: 40, height: 40)
-            }
-            Spacer()
-            Text("Queue")
-                .font(AppTheme.text(15, weight: .semibold))
-                .foregroundStyle(AppTheme.ink)
-            Spacer()
-            Color.clear.frame(width: 40, height: 40)
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
-    }
-
-    // MARK: Rows
-
-    private func nowPlayingCard(_ track: Track) -> some View {
+    private func queueRow(_ track: Track, displayIndex: Int) -> some View {
         HStack(spacing: 12) {
-            ArtworkView(url: track.artworkUrl, size: 52)
-                .frame(width: 52, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(track.name)
-                    .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                Text(track.artistName)
-                    .font(AppTheme.text(12))
-                    .foregroundStyle(AppTheme.ink2)
-            }
-            Spacer()
-        }
-        .padding(12)
-        .background(AppTheme.surface.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
+            Text("\(displayIndex)")
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(Color.mmMutedFg)
+                .frame(width: 20, alignment: .center)
 
-    private func upcomingRow(_ track: Track) -> some View {
-        HStack(spacing: 12) {
             ArtworkView(url: track.artworkUrl, size: 44)
                 .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name)
-                    .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.mmForeground)
                     .lineLimit(1)
                 Text(track.artistName)
-                    .font(AppTheme.text(12))
-                    .foregroundStyle(AppTheme.ink2)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.mmMutedFg)
                     .lineLimit(1)
             }
+
             Spacer()
+
+            Text(formatDuration(track.durationMs))
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(Color.mmMutedFg)
         }
+        .padding(8)
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(AppTheme.text(11, weight: .semibold))
-            .foregroundStyle(AppTheme.ink2)
-            .tracking(1.0)
-            .padding(.top, 16)
-    }
-
-    // MARK: Mutations
-
-    private func handleMove(from source: IndexSet, to destination: Int) {
-        // Offsets are relative to the filtered "next up" slice. Translate to absolute.
-        let startAbs = queue.currentIndex + 1
-        let absSource = IndexSet(source.map { $0 + startAbs })
-        let absDestination = destination + startAbs
-        queue.move(from: absSource, to: absDestination)
-    }
-
-    private func handleDelete(at offsets: IndexSet) {
-        let startAbs = queue.currentIndex + 1
-        let absOffsets = IndexSet(offsets.map { $0 + startAbs })
-        queue.remove(atOffsets: absOffsets)
+    private func formatDuration(_ ms: Int) -> String {
+        guard ms > 0 else { return "0:00" }
+        let total = ms / 1000
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

@@ -42,6 +42,7 @@ targets:
           NSAllowsArbitraryLoads: false
         SPOTIFY_FREE_BACKEND_URL: "$(SPOTIFY_FREE_BACKEND_URL)"
         UIAppFonts:
+          - Fonts/InstrumentSerif-Regular.ttf
           - Fonts/DMSerifDisplay-Regular.ttf
           - Fonts/DMSerifDisplay-Italic.ttf
           - Fonts/Manrope-Regular.ttf

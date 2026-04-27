@@ -27,6 +27,7 @@
 	<string>$(SPOTIFY_FREE_BACKEND_URL)</string>
 	<key>UIAppFonts</key>
 	<array>
+		<string>Fonts/InstrumentSerif-Regular.ttf</string>
 		<string>Fonts/DMSerifDisplay-Regular.ttf</string>
 		<string>Fonts/DMSerifDisplay-Italic.ttf</string>
 		<string>Fonts/Manrope-Regular.ttf</string>

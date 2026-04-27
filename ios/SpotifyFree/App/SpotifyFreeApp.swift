@@ -18,16 +18,13 @@ struct SpotifyFreeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                AppTheme.bg.ignoresSafeArea()
-                RootShell()
-            }
-            .environmentObject(player)
-            .environmentObject(queue)
-            .environmentObject(router)
-            .environment(\.managedObjectContext, persistence.container.viewContext)
-            .preferredColorScheme(.dark)
-            .tint(.white)
+            RootShell()
+                .environmentObject(player)
+                .environmentObject(queue)
+                .environmentObject(router)
+                .environment(\.managedObjectContext, persistence.container.viewContext)
+                .preferredColorScheme(.dark)
+                .tint(Color.mmForeground)
         }
     }
 
@@ -42,43 +39,41 @@ struct SpotifyFreeApp: App {
     }
 }
 
-/// ZStack shell: selected-tab content at the bottom of the stack, with the
-/// MiniPlayer + custom tab bar overlaid. FullPlayer and Queue come up as
-/// fullScreenCover modals.
 struct RootShell: View {
     @EnvironmentObject var router: TabRouter
     @EnvironmentObject var queue: QueueManager
-    @State private var showQueue = false
     @State private var showFullPlayer = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Selected tab content
-            Group {
-                switch router.selected {
-                case .home:    HomeView()
-                case .search:  SearchView()
-                case .library: LibraryView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack {
+            stageGradient.ignoresSafeArea()
 
-            // MiniPlayer + tab bar stack
-            VStack(spacing: 0) {
-                if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
-                    MiniPlayerCard(onTap: { showFullPlayer = true })
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+            ZStack(alignment: .bottom) {
+                // Tab content
+                Group {
+                    switch router.selected {
+                    case .home:    HomeView()
+                    case .search:  SearchView()
+                    case .library: LibraryView()
+                    case .queue:   QueueView()
+                    }
                 }
-                SleekTabBar(selected: $router.selected, onQueueTap: { showQueue = true })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // MiniPlayer + TabBar
+                VStack(spacing: 0) {
+                    if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
+                        MiniPlayerCard(onTap: { showFullPlayer = true })
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 8)
+                    }
+                    SleekTabBar(selected: $router.selected)
+                }
+                .ignoresSafeArea(.keyboard, edges: .bottom)
             }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .fullScreenCover(isPresented: $showFullPlayer) {
             FullPlayerView(onDismiss: { showFullPlayer = false })
-        }
-        .fullScreenCover(isPresented: $showQueue) {
-            QueueView(onDismiss: { showQueue = false })
         }
     }
 }

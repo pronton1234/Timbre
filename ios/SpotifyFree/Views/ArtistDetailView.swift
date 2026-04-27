@@ -94,10 +94,10 @@ struct ArtistDetailView: View {
             } label: {
                 Text("Play")
                     .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Color.mmBackground)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 10)
-                    .background(Color.white)
+                    .background(Color.mmForeground)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -106,7 +106,7 @@ struct ArtistDetailView: View {
             } label: {
                 Text(following ? "Following" : "Follow")
                     .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(following ? Color.white : AppTheme.ink)
+                    .foregroundStyle(following ? Color.mmBackground : Color.mmForeground)
                     .frame(height: 48)
                     .padding(.horizontal, 18)
                     .background(

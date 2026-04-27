@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// A single track row in the Sleek dark palette:
-/// 44×44 art tile, title (semibold 14 white), artist (12 gray), optional
-/// leading index, trailing ellipsis (opens "Add to Queue" action) or a
-/// custom accessory.
+/// Single track row — MinimalMusic style.
+/// Optional leading index, 48×48 artwork, title/artist, trailing duration.
 struct TrackRow: View {
     let track: Track
     var index: Int? = nil
@@ -17,24 +15,23 @@ struct TrackRow: View {
             HStack(spacing: 12) {
                 if let index {
                     Text("\(index)")
-                        .font(AppTheme.text(14, weight: .medium))
-                        .foregroundStyle(AppTheme.ink2)
-                        .frame(width: 22, alignment: .trailing)
-                        .monospacedDigit()
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(Color.mmMutedFg)
+                        .frame(width: 20, alignment: .center)
                 }
                 if showArtwork {
-                    ArtworkView(url: track.artworkUrl, size: 44)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    ArtworkView(url: track.artworkUrl, size: 48)
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name)
-                        .font(AppTheme.text(14, weight: .semibold))
-                        .foregroundStyle(AppTheme.ink)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.mmForeground)
                         .lineLimit(1)
                     Text(track.artistName)
-                        .font(AppTheme.text(12))
-                        .foregroundStyle(AppTheme.ink2)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Color.mmMutedFg)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
@@ -43,16 +40,27 @@ struct TrackRow: View {
                 } else if let onAddToQueue {
                     Button(action: onAddToQueue) {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(AppTheme.ink2)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.mmMutedFg)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                } else {
+                    Text(formatDuration(track.durationMs))
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(Color.mmMutedFg)
                 }
             }
+            .padding(8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func formatDuration(_ ms: Int) -> String {
+        guard ms > 0 else { return "0:00" }
+        let total = ms / 1000
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

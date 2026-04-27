@@ -8,146 +8,127 @@ struct SearchView: View {
     @State private var albums: [Album] = []
     @State private var artists: [Artist] = []
     @State private var debounceTask: Task<Void, Never>?
-
     @State private var recentSearches: [String] = SearchView.loadRecents()
 
     @EnvironmentObject var queue: QueueManager
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppTheme.bg.ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header
+                    Text("Search")
+                        .font(.display(40))
+                        .foregroundStyle(Color.mmForeground)
+                        .padding(.bottom, 24)
 
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    searchBar
-                    if term.trimmingCharacters(in: .whitespaces).isEmpty {
-                        recentsSection
-                    } else {
-                        resultsScroll
+                    // Search box
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16))
+                            .foregroundStyle(Color.mmMutedFg)
+                        TextField("", text: $term)
+                            .placeholder(when: term.isEmpty) {
+                                Text("Songs, artists, albums")
+                                    .foregroundStyle(Color.mmMutedFg)
+                            }
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.mmForeground)
+                            .autocapitalization(.none)
+                            .focused($fieldFocused)
+                            .submitLabel(.search)
+                            .onSubmit { recordRecent(term); runSearch() }
+                        if !term.isEmpty {
+                            Button { term = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Color.mmMutedFg)
+                            }.buttonStyle(.plain)
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(Color.mmMuted.opacity(0.7))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 32)
+
+                    // Content
+                    let trimmed = term.trimmingCharacters(in: .whitespaces)
+                    if trimmed.isEmpty {
+                        if recentSearches.isEmpty {
+                            Text("Search for any song, artist, or album.")
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.mmMutedFg)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 64)
+                        } else {
+                            recentsSection
+                        }
+                    } else if tracks.isEmpty && albums.isEmpty && artists.isEmpty {
+                        Text("No results for \"\(trimmed)\"")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.mmMutedFg)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 64)
+                    } else {
+                        resultsSection
+                    }
                 }
-                .padding(.top, 48)
+                .padding(.horizontal, 20)
+                .padding(.top, 56)
+                .padding(.bottom, 160)
             }
+            .background(Color.clear)
             .navigationBarHidden(true)
             .onChange(of: term) { _ in debounceSearch() }
             .navigationDestination(for: Album.self) { AlbumDetailView(album: $0) }
             .navigationDestination(for: Artist.self) { ArtistDetailView(artist: $0) }
         }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        Text("Search")
-            .font(AppTheme.text(30, weight: .bold))
-            .foregroundStyle(AppTheme.ink)
-            .padding(.horizontal, 16)
-    }
-
-    // MARK: - Search bar
-
-    private var searchBar: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink3)
-                TextField("What do you want to listen to?", text: $term)
-                    .font(AppTheme.text(15))
-                    .foregroundStyle(.black)
-                    .focused($fieldFocused)
-                    .submitLabel(.search)
-                    .onSubmit { recordRecent(term); runSearch() }
-                if !term.isEmpty {
-                    Button { term = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(AppTheme.ink3)
-                    }.buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(Color.white)
-            .clipShape(Capsule())
-
-            if fieldFocused {
-                Button("Cancel") {
-                    term = ""
-                    fieldFocused = false
-                }
-                .font(AppTheme.text(15, weight: .medium))
-                .foregroundStyle(AppTheme.ink)
-            }
-        }
-        .padding(.horizontal, 16)
         .animation(.easeInOut(duration: 0.15), value: fieldFocused)
     }
 
     // MARK: - Recents
 
     private var recentsSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !recentSearches.isEmpty {
-                    Text("Recent Searches")
-                        .font(AppTheme.text(20, weight: .bold))
-                        .foregroundStyle(AppTheme.ink)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                    VStack(spacing: 0) {
-                        ForEach(recentSearches, id: \.self) { q in
-                            recentRow(q)
-                        }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(recentSearches, id: \.self) { q in
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8).fill(Color.mmSurface)
+                        Image(systemName: "clock")
+                            .foregroundStyle(Color.mmMutedFg)
                     }
+                    .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(q)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.mmForeground)
+                        Text("Recent")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.mmMutedFg)
+                    }
+                    Spacer()
+                    Button { removeRecent(q) } label: {
+                        Image(systemName: "xmark")
+                            .foregroundStyle(Color.mmMutedFg)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
                 }
-                Color.clear.frame(height: 160)
+                .padding(8)
+                .contentShape(Rectangle())
+                .onTapGesture { term = q; runSearch() }
             }
-        }
-    }
-
-    private func recentRow(_ query: String) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(AppTheme.surface)
-                Image(systemName: "clock")
-                    .foregroundStyle(AppTheme.ink2)
-            }
-            .frame(width: 48, height: 48)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(query)
-                    .font(AppTheme.text(15, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                Text("Recent")
-                    .font(AppTheme.text(12))
-                    .foregroundStyle(AppTheme.ink2)
-            }
-            Spacer()
-            Button { removeRecent(query) } label: {
-                Image(systemName: "xmark")
-                    .foregroundStyle(AppTheme.ink2)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            term = query
-            runSearch()
         }
     }
 
     // MARK: - Results
 
-    private var resultsScroll: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if !tracks.isEmpty {
-                    resultsGroup(title: "Songs") {
+    private var resultsSection: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if !tracks.isEmpty {
+                sectionBlock(title: "Songs") {
+                    VStack(spacing: 4) {
                         ForEach(tracks) { t in
                             TrackRow(
                                 track: t,
@@ -157,80 +138,74 @@ struct SearchView: View {
                                 },
                                 onAddToQueue: { queue.addToQueue(t) }
                             )
-                            .padding(.horizontal, 16)
                         }
                     }
                 }
-                if !albums.isEmpty {
-                    resultsGroup(title: "Albums") {
+            }
+            if !albums.isEmpty {
+                sectionBlock(title: "Albums") {
+                    VStack(spacing: 4) {
                         ForEach(albums) { a in
                             NavigationLink(value: a) { albumRow(a) }
                                 .buttonStyle(.plain)
                         }
                     }
                 }
-                if !artists.isEmpty {
-                    resultsGroup(title: "Artists") {
+            }
+            if !artists.isEmpty {
+                sectionBlock(title: "Artists") {
+                    VStack(spacing: 4) {
                         ForEach(artists) { ar in
                             NavigationLink(value: ar) { artistRow(ar) }
                                 .buttonStyle(.plain)
                         }
                     }
                 }
-                if tracks.isEmpty && albums.isEmpty && artists.isEmpty {
-                    Text("No results yet — keep typing.")
-                        .font(AppTheme.text(13))
-                        .foregroundStyle(AppTheme.ink2)
-                        .padding(.horizontal, 16)
-                }
-                Color.clear.frame(height: 160)
             }
         }
     }
 
     @ViewBuilder
-    private func resultsGroup<Content: View>(title: String,
-                                             @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(AppTheme.text(20, weight: .bold))
-                .foregroundStyle(AppTheme.ink)
-                .padding(.horizontal, 16)
+    private func sectionBlock<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .regular))
+                .tracking(2)
+                .foregroundStyle(Color.mmMutedFg)
             content()
         }
     }
 
     private func albumRow(_ a: Album) -> some View {
         HStack(spacing: 12) {
-            ArtworkView(url: a.artworkUrl, size: 44, seedOverride: ArtTile.seed(from: a.id))
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+            ArtworkView(url: a.artworkUrl, size: 48, seedOverride: ArtTile.seed(from: a.id))
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
                 Text(a.name)
-                    .font(AppTheme.text(14, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink).lineLimit(1)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.mmForeground).lineLimit(1)
                 Text(a.artistName)
-                    .font(AppTheme.text(12))
-                    .foregroundStyle(AppTheme.ink2).lineLimit(1)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.mmMutedFg).lineLimit(1)
             }
             Spacer()
-        }.padding(.horizontal, 16)
+        }
+        .padding(8)
     }
 
     private func artistRow(_ ar: Artist) -> some View {
         HStack(spacing: 12) {
             Circle()
-                .fill(AppTheme.surface)
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: "person.fill")
-                        .foregroundStyle(AppTheme.ink2)
-                )
+                .fill(Color.mmSurface)
+                .frame(width: 48, height: 48)
+                .overlay(Image(systemName: "person.fill").foregroundStyle(Color.mmMutedFg))
             Text(ar.name)
-                .font(AppTheme.text(14, weight: .semibold))
-                .foregroundStyle(AppTheme.ink).lineLimit(1)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.mmForeground).lineLimit(1)
             Spacer()
-        }.padding(.horizontal, 16)
+        }
+        .padding(8)
     }
 
     // MARK: - Search lifecycle
@@ -248,30 +223,23 @@ struct SearchView: View {
         let q = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { tracks = []; albums = []; artists = []; return }
         Task {
-            async let t = (try? await iTunesClient.shared.searchTracks(q))  ?? []
-            async let al = (try? await iTunesClient.shared.searchAlbums(q)) ?? []
+            async let t  = (try? await iTunesClient.shared.searchTracks(q))  ?? []
+            async let al = (try? await iTunesClient.shared.searchAlbums(q))  ?? []
             async let ar = (try? await iTunesClient.shared.searchArtists(q)) ?? []
             let (tv, av, arv) = await (t, al, ar)
-            await MainActor.run {
-                tracks = tv
-                albums = av
-                artists = arv
-            }
+            await MainActor.run { tracks = tv; albums = av; artists = arv }
         }
     }
 
-    // MARK: - Recent searches (UserDefaults)
+    // MARK: - Recent searches
 
     private static let recentsKey = "searchView.recent.v1"
-
     private static func loadRecents() -> [String] {
         UserDefaults.standard.stringArray(forKey: recentsKey) ?? []
     }
-
     private static func saveRecents(_ values: [String]) {
         UserDefaults.standard.set(values, forKey: recentsKey)
     }
-
     private func recordRecent(_ raw: String) {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
@@ -282,9 +250,22 @@ struct SearchView: View {
         recentSearches = list
         Self.saveRecents(list)
     }
-
     private func removeRecent(_ q: String) {
         recentSearches.removeAll { $0 == q }
         Self.saveRecents(recentSearches)
+    }
+}
+
+// MARK: - Placeholder modifier
+
+extension View {
+    func placeholder<Content: View>(
+        when shouldShow: Bool,
+        @ViewBuilder placeholder: () -> Content
+    ) -> some View {
+        ZStack(alignment: .leading) {
+            if shouldShow { placeholder() }
+            self
+        }
     }
 }

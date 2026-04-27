@@ -3,7 +3,6 @@ import MediaPlayer
 
 // MARK: - MiniPlayerCard
 
-/// Floating rounded mini-player that sits above the tab bar.
 struct MiniPlayerCard: View {
     @EnvironmentObject var player: AudioPlayer
     @EnvironmentObject var queue: QueueManager
@@ -11,67 +10,73 @@ struct MiniPlayerCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.mmForeground.opacity(0.10))
+                    Rectangle()
+                        .fill(Color.mmForeground.opacity(0.7))
+                        .frame(width: geo.size.width * (player.isPlaying ? 0.66 : 0.33))
+                        .animation(.easeOut(duration: 0.4), value: player.isPlaying)
+                }
+            }
+            .frame(height: 2)
+
+            // Content
             HStack(spacing: 12) {
-                ArtworkView(url: player.currentTrack?.artworkUrl, size: 40)
-                    .frame(width: 40, height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                ArtworkView(url: player.currentTrack?.artworkUrl, size: 44)
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(player.currentTrack?.name ?? "—")
-                        .font(AppTheme.text(13, weight: .semibold))
-                        .foregroundStyle(AppTheme.ink)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.mmForeground)
                         .lineLimit(1)
                     Text(player.currentTrack?.artistName ?? "")
-                        .font(AppTheme.text(11))
-                        .foregroundStyle(AppTheme.ink2)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(Color.mmForeground.opacity(0.55))
                         .lineLimit(1)
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 0)
 
                 Button {
                     player.togglePlayPause()
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(AppTheme.ink)
-                        .frame(width: 40, height: 40)
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.mmForeground)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await queue.advance(manual: true) }
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.mmForeground)
+                        .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-
-            // thin white progress line
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(AppTheme.hair)
-                    Rectangle()
-                        .fill(AppTheme.ink)
-                        .frame(width: geo.size.width * CGFloat(progressFraction))
-                }
-            }
-            .frame(height: 2)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
-        .background(AppTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: AppTheme.shadowSoft, radius: 8, y: 4)
+        .background(Color.mmPlayerBg)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 8)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
-    }
-
-    private var progressFraction: Double {
-        let d = player.duration
-        guard d > 0 else { return 0 }
-        return min(max(player.position / d, 0), 1)
     }
 }
 
 // MARK: - FullPlayerView
 
-/// Full-screen player: gradient bg, edge-to-edge album art, big white circle
-/// play button. Presented as fullScreenCover from RootShell.
 struct FullPlayerView: View {
     @EnvironmentObject var player: AudioPlayer
     @EnvironmentObject var queue: QueueManager
@@ -82,7 +87,10 @@ struct FullPlayerView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.fullPlayerBg.ignoresSafeArea()
+            LinearGradient(
+                colors: [Color.mmSurface, Color.mmBackground],
+                startPoint: .top, endPoint: .bottom
+            ).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
@@ -115,33 +123,29 @@ struct FullPlayerView: View {
         isLiked = next
     }
 
-    // MARK: Subviews
-
     private var header: some View {
         HStack {
             Button(action: onDismiss) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(Color.mmForeground)
                     .frame(width: 40, height: 40)
             }
             Spacer()
             Text("Now Playing")
-                .font(AppTheme.text(13, weight: .semibold))
-                .foregroundStyle(AppTheme.ink)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.mmForeground)
             Spacer()
             Menu {
                 if player.currentTrack != nil {
-                    Button {
-                        toggleLike()
-                    } label: {
+                    Button { toggleLike() } label: {
                         Label(isLiked ? "Unlike" : "Like", systemImage: "heart")
                     }
                 }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(Color.mmForeground)
                     .frame(width: 40, height: 40)
             }
         }
@@ -154,7 +158,7 @@ struct FullPlayerView: View {
             ArtworkView(url: player.currentTrack?.artworkUrl, size: size)
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: AppTheme.shadowStrong, radius: 30, y: 12)
+                .shadow(color: .black.opacity(0.6), radius: 30, y: 12)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .aspectRatio(1, contentMode: .fit)
@@ -164,21 +168,19 @@ struct FullPlayerView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(player.currentTrack?.name ?? "—")
-                    .font(AppTheme.text(22, weight: .bold))
-                    .foregroundStyle(AppTheme.ink)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color.mmForeground)
                     .lineLimit(2)
                 Text(player.currentTrack?.artistName ?? "")
-                    .font(AppTheme.text(15))
-                    .foregroundStyle(AppTheme.ink2)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Color.mmMutedFg)
                     .lineLimit(1)
             }
             Spacer()
-            Button {
-                toggleLike()
-            } label: {
+            Button { toggleLike() } label: {
                 Image(systemName: isLiked ? "heart.fill" : "heart")
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundStyle(AppTheme.ink)
+                    .font(.system(size: 24))
+                    .foregroundStyle(isLiked ? Color.mmAccent : Color.mmForeground)
                     .padding(.leading, 12)
             }.buttonStyle(.plain)
         }
@@ -200,15 +202,15 @@ struct FullPlayerView: View {
                     }
                 }
             )
-            .tint(AppTheme.ink)
+            .tint(Color.mmForeground)
 
             HStack {
                 Text(format(scrubTarget ?? player.position))
                 Spacer()
                 Text(format(player.duration))
             }
-            .font(AppTheme.text(11))
-            .foregroundStyle(AppTheme.ink2)
+            .font(.system(size: 11))
+            .foregroundStyle(Color.mmMutedFg)
         }
     }
 
@@ -217,21 +219,21 @@ struct FullPlayerView: View {
             Button { queue.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(queue.shuffleOn ? AppTheme.ink : AppTheme.ink2)
+                    .foregroundStyle(queue.shuffleOn ? Color.mmAccent : Color.mmMutedFg)
             }.buttonStyle(.plain)
             Spacer()
             Button { Task { await queue.previous() } } label: {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(Color.mmForeground)
             }.buttonStyle(.plain)
             Spacer()
             Button { player.togglePlayPause() } label: {
                 ZStack {
-                    Circle().fill(Color.white)
+                    Circle().fill(Color.mmForeground)
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Color.mmBackground)
                 }
                 .frame(width: 64, height: 64)
             }.buttonStyle(.plain)
@@ -239,24 +241,16 @@ struct FullPlayerView: View {
             Button { Task { await queue.advance(manual: true) } } label: {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(Color.mmForeground)
             }.buttonStyle(.plain)
             Spacer()
             Button { queue.cycleRepeatMode() } label: {
-                Image(systemName: repeatIcon)
+                Image(systemName: queue.repeatMode == .one ? "repeat.1" : "repeat")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(queue.repeatMode == .off ? AppTheme.ink2 : AppTheme.ink)
+                    .foregroundStyle(queue.repeatMode == .off ? Color.mmMutedFg : Color.mmAccent)
             }.buttonStyle(.plain)
         }
         .padding(.vertical, 16)
-    }
-
-    private var repeatIcon: String {
-        switch queue.repeatMode {
-        case .off: return "repeat"
-        case .all: return "repeat"
-        case .one: return "repeat.1"
-        }
     }
 
     private func format(_ s: Double) -> String {
