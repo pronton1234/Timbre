@@ -45,6 +45,37 @@ actor BackendClient {
         return try await getJSON(url: url)
     }
 
+    /// Backend response shape for /stream-url
+    struct StreamURLResponse: Decodable {
+        let videoId: String
+        let url: String
+        let extractor: String?
+        let expiresAt: Int64?
+        let source: String?  // "cache" | "fresh"
+    }
+
+    /// Hit /stream-url for a directly-playable googlevideo URL. Cache hit is ~80ms RTT;
+    /// cache miss runs the backend's parallel extractor pool (youtubei racing ytdlp)
+    /// which typically returns in 500–800ms, with a hard 1.5s budget by default. On
+    /// 503 (extraction failed) or timeout, throws — caller falls back to on-device
+    /// extraction. This default timeout is set high enough for the backend's racing
+    /// extractor to win on cold-cold; callers that need a stricter budget pass their own.
+    func fetchStreamURL(videoId: String, timeoutSeconds: TimeInterval = 1.5) async throws -> StreamURLResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("stream-url"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "videoId", value: videoId)]
+        guard let url = comps.url else { throw BackendError.misconfigured }
+        // Single-shot, no retries; this is on the latency-critical path.
+        var req = URLRequest(url: url, timeoutInterval: timeoutSeconds)
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw BackendError.badResponse(-1, "no http") }
+        guard (200..<300).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw BackendError.badResponse(http.statusCode, body)
+        }
+        return try JSONDecoder().decode(StreamURLResponse.self, from: data)
+    }
+
     // MARK: - Private
 
     private func getJSON<T: Decodable>(url: URL) async throws -> T {

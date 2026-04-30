@@ -1,0 +1,8 @@
+name = "timbre-proxy"
+main = "src/proxy.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# Override ORIGIN_URL in the Cloudflare dashboard (Workers → Settings → Variables)
+# or set it as a secret: wrangler secret put ORIGIN_URL
+ORIGIN_URL = "https://free-spotify.duckdns.org"

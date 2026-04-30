@@ -90,7 +90,7 @@ struct ArtistDetailView: View {
             Button {
                 let ts = popular
                 guard !ts.isEmpty else { return }
-                Task { await QueueManager.shared.playNow(ts) }
+                Task { await QueueManager.shared.playNow(ts, kind: .artistTopTracks(artist)) }
             } label: {
                 Text("Play")
                     .font(AppTheme.text(14, weight: .semibold))
@@ -141,7 +141,7 @@ struct ArtistDetailView: View {
                             track: track,
                             index: idx + 1,
                             onTap: {
-                                Task { await QueueManager.shared.playNow(popular, startAt: idx) }
+                                Task { await QueueManager.shared.playNow(popular, startAt: idx, kind: .artistTopTracks(artist)) }
                             },
                             onAddToQueue: { QueueManager.shared.addToQueue(track) }
                         )
@@ -207,15 +207,25 @@ struct ArtistDetailView: View {
     // MARK: - Data
 
     private func load() async {
-        do {
-            let fetched = try await iTunesClient.shared.albumsByArtist(artist.itunesArtistId)
-            await MainActor.run { self.albums = fetched }
-            if let top = fetched.first {
+        // Fetch albums and Last.fm-ranked top tracks in parallel.
+        async let fetchedAlbums = (try? await iTunesClient.shared.albumsByArtist(artist.itunesArtistId)) ?? []
+        async let fetchedPopular = SearchService.shared.artistTopTracks(name: artist.name, artistId: artist.itunesArtistId)
+        let (albums, popular) = await (fetchedAlbums, fetchedPopular)
+        await MainActor.run {
+            self.albums = albums
+            // Use Last.fm results if non-empty, otherwise fall back to first album tracks.
+            if !popular.isEmpty {
+                self.popular = popular
+            }
+        }
+        // If Last.fm returned nothing and we have albums, fall back to first album tracks.
+        if popular.isEmpty, let top = albums.first {
+            do {
                 let ts = try await iTunesClient.shared.tracksByAlbum(top.itunesCollectionId)
                 await MainActor.run { self.popular = ts }
+            } catch {
+                print("ArtistDetailView.load fallback failed: \(error)")
             }
-        } catch {
-            print("ArtistDetailView.load failed: \(error)")
         }
     }
 

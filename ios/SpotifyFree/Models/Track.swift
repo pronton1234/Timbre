@@ -14,6 +14,8 @@ struct Track: Identifiable, Hashable, Codable {
     let durationMs: Int
     let artworkUrl: URL?
     let previewUrl: URL?
+    /// Known YouTube videoId — set for YouTube Music results so the resolve step can be skipped.
+    let videoId: String?
 
     var id: Int { itunesTrackId }
 
@@ -27,7 +29,8 @@ struct Track: Identifiable, Hashable, Codable {
         albumId: Int? = nil,
         durationMs: Int,
         artworkUrl: URL? = nil,
-        previewUrl: URL? = nil
+        previewUrl: URL? = nil,
+        videoId: String? = nil
     ) {
         self.itunesTrackId = itunesTrackId
         self.isrc = isrc
@@ -39,5 +42,6 @@ struct Track: Identifiable, Hashable, Codable {
         self.durationMs = durationMs
         self.artworkUrl = artworkUrl
         self.previewUrl = previewUrl
+        self.videoId = videoId
     }
 }

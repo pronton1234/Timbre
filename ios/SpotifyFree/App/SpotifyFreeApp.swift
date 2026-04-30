@@ -7,6 +7,7 @@ struct SpotifyFreeApp: App {
     @StateObject private var player = AudioPlayer.shared
     @StateObject private var queue = QueueManager.shared
     @StateObject private var router = TabRouter()
+    @Environment(\.scenePhase) private var scenePhase
     let persistence = PersistenceController.shared
 
     init() {
@@ -25,6 +26,16 @@ struct SpotifyFreeApp: App {
                 .environment(\.managedObjectContext, persistence.container.viewContext)
                 .preferredColorScheme(.dark)
                 .tint(Color.mmForeground)
+                .onAppear {
+                    // After queue is restored from disk, seek to saved position.
+                    // Player stays paused — user resumes intentionally.
+                    AudioPlayer.shared.restorePosition()
+                }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .inactive || phase == .background {
+                AudioPlayer.shared.savePositionNow()
+            }
         }
     }
 
@@ -62,7 +73,7 @@ struct RootShell: View {
 
                 // MiniPlayer + TabBar
                 VStack(spacing: 0) {
-                    if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
+                    if queue.currentTrack != nil {
                         MiniPlayerCard(onTap: { showFullPlayer = true })
                             .padding(.horizontal, 12)
                             .padding(.bottom, 8)
@@ -73,7 +84,11 @@ struct RootShell: View {
             }
         }
         .fullScreenCover(isPresented: $showFullPlayer) {
-            FullPlayerView(onDismiss: { showFullPlayer = false })
+            // NavigationStack so that artist-name taps can push ArtistDetailView.
+            NavigationStack {
+                FullPlayerView(onDismiss: { showFullPlayer = false })
+                    .navigationDestination(for: Artist.self) { ArtistDetailView(artist: $0) }
+            }
         }
     }
 }

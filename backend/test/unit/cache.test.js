@@ -48,9 +48,57 @@ test('recordMatch without ISRC only writes query row', () => {
   assert.ok(c.getMatchByQuery('a', 't'))
 })
 
-test('stream URL LRU stores and evicts', () => {
+test('stream URL cache: miss returns null', () => {
   const c = freshCache()
   assert.equal(c.getStreamUrl('v1'), null)
-  c.setStreamUrl('v1', 'https://cdn/one')
-  assert.equal(c.getStreamUrl('v1'), 'https://cdn/one')
+})
+
+test('stream URL cache: round-trip returns url + extractor + expiresAt', () => {
+  const c = freshCache()
+  c.setStreamUrl('v1', 'https://cdn/one', 'ytdlp')
+  const got = c.getStreamUrl('v1')
+  assert.equal(got.url, 'https://cdn/one')
+  assert.equal(got.extractor, 'ytdlp')
+  assert.ok(got.expiresAt > Date.now())
+  assert.ok(got.expiresAt - Date.now() < 6 * 60 * 60 * 1000, 'expiry within 6h')
+})
+
+test('stream URL cache: expired entry returns null and is purged', () => {
+  const c = freshCache()
+  // 1ms TTL — guaranteed expired by the time we read it back
+  c.setStreamUrl('v1', 'https://cdn/one', 'ytdlp', 1)
+  // Wait a tick to ensure expiry
+  const start = Date.now()
+  while (Date.now() - start < 5) { /* spin briefly */ }
+  assert.equal(c.getStreamUrl('v1'), null)
+})
+
+test('stream URL cache: invalidate removes entry', () => {
+  const c = freshCache()
+  c.setStreamUrl('v1', 'https://cdn/one', 'ytdlp')
+  assert.ok(c.getStreamUrl('v1'))
+  c.invalidateStreamUrl('v1')
+  assert.equal(c.getStreamUrl('v1'), null)
+})
+
+test('stream URL cache: persists across cache instances on same db', () => {
+  // Simulates restart: two createCache() calls on same db file should share data
+  const db = openDb(':memory:')
+  const c1 = createCache(db)
+  c1.setStreamUrl('v1', 'https://cdn/one', 'ytdlp')
+  const c2 = createCache(db)
+  const got = c2.getStreamUrl('v1')
+  assert.equal(got.url, 'https://cdn/one')
+  assert.equal(got.extractor, 'ytdlp')
+})
+
+test('stream URL cache: purgeExpiredStreamUrls removes only expired rows', () => {
+  const c = freshCache()
+  c.setStreamUrl('alive', 'https://cdn/alive', 'ytdlp')
+  c.setStreamUrl('expired', 'https://cdn/expired', 'ytdlp', 1)
+  const start = Date.now()
+  while (Date.now() - start < 5) { /* spin */ }
+  const purged = c.purgeExpiredStreamUrls()
+  assert.equal(purged, 1)
+  assert.ok(c.getStreamUrl('alive'))
 })

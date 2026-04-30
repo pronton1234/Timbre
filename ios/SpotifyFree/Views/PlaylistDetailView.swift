@@ -86,7 +86,9 @@ struct PlaylistDetailView: View {
         HStack(spacing: 10) {
             Button {
                 let ts = tracks.map(\.asTrack)
-                Task { await QueueManager.shared.playNow(ts) }
+                let pid = playlist.id ?? UUID()
+                let pname = playlist.name ?? "Playlist"
+                Task { await QueueManager.shared.playNow(ts, kind: .playlist(id: pid, name: pname)) }
             } label: {
                 Text("Play")
                     .font(AppTheme.text(14, weight: .semibold))
@@ -99,7 +101,9 @@ struct PlaylistDetailView: View {
             .buttonStyle(.plain)
             Button {
                 let ts = tracks.map(\.asTrack).shuffled()
-                Task { await QueueManager.shared.playNow(ts) }
+                let pid = playlist.id ?? UUID()
+                let pname = playlist.name ?? "Playlist"
+                Task { await QueueManager.shared.playNow(ts, kind: .playlist(id: pid, name: pname)) }
             } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 15, weight: .semibold))
@@ -146,7 +150,9 @@ struct PlaylistDetailView: View {
                             track: track,
                             onTap: {
                                 let ts = tracks.map(\.asTrack)
-                                Task { await QueueManager.shared.playNow(ts, startAt: idx) }
+                                let pid = playlist.id ?? UUID()
+                                let pname = playlist.name ?? "Playlist"
+                                Task { await QueueManager.shared.playNow(ts, startAt: idx, kind: .playlist(id: pid, name: pname)) }
                             },
                             onAddToQueue: { QueueManager.shared.addToQueue(track) }
                         )

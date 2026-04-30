@@ -48,14 +48,13 @@ struct QueueView: View {
                     .padding(.bottom, 32)
 
                 // Now Playing
-                if queue.currentIndex >= 0, queue.queue.indices.contains(queue.currentIndex) {
+                if let nowTrack = queue.currentTrack {
                     Text("NOW PLAYING")
                         .font(.system(size: 11, weight: .regular))
                         .tracking(2)
                         .foregroundStyle(Color.mmMutedFg)
                         .padding(.bottom, 12)
 
-                    let nowTrack = queue.queue[queue.currentIndex].track
                     HStack(spacing: 12) {
                         ArtworkView(url: nowTrack.artworkUrl, size: 56)
                             .frame(width: 56, height: 56)
@@ -82,23 +81,54 @@ struct QueueView: View {
                     .padding(.bottom, 32)
                 }
 
-                // Next in Queue
-                let upcoming = queue.queue.enumerated().filter { $0.offset > queue.currentIndex }
-                if !upcoming.isEmpty {
+                // User Queue — drag-to-reorder
+                if !queue.userQueue.isEmpty {
                     Text("NEXT IN QUEUE")
                         .font(.system(size: 11, weight: .regular))
                         .tracking(2)
                         .foregroundStyle(Color.mmMutedFg)
                         .padding(.bottom, 12)
 
-                    VStack(spacing: 4) {
-                        ForEach(Array(upcoming), id: \.element.id) { (offset, item) in
-                            queueRow(item.track, displayIndex: offset - queue.currentIndex)
+                    List {
+                        ForEach(queue.userQueue) { item in
+                            queueRow(item.track, badge: nil)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                         }
+                        .onMove { source, dest in queue.move(from: source, to: dest) }
+                        .onDelete { offsets in queue.remove(atOffsets: offsets) }
                     }
+                    .listStyle(.plain)
+                    .scrollDisabled(true)
+                    .environment(\.editMode, .constant(.active))
+                    .frame(minHeight: CGFloat(queue.userQueue.count * 64))
+                    .padding(.bottom, 24)
                 }
 
-                if queue.queue.isEmpty {
+                // Context remaining — tappable but not reorderable
+                if let ctx = queue.context, !ctx.remainingTracks.isEmpty {
+                    Text("NEXT FROM \(ctx.contextLabel.uppercased())")
+                        .font(.system(size: 11, weight: .regular))
+                        .tracking(2)
+                        .foregroundStyle(Color.mmMutedFg)
+                        .padding(.bottom, 12)
+                        .lineLimit(1)
+
+                    let remaining = ctx.remainingTracks
+                    VStack(spacing: 4) {
+                        ForEach(Array(remaining.enumerated()), id: \.element.id) { i, track in
+                            queueRow(track, badge: nil)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    Task { await queue.jumpContext(to: ctx.cursor + 1 + i) }
+                                }
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+
+                if queue.currentTrack == nil && queue.userQueue.isEmpty {
                     Text("Your queue is empty.")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.mmMutedFg)
@@ -113,13 +143,8 @@ struct QueueView: View {
         .background(Color.clear)
     }
 
-    private func queueRow(_ track: Track, displayIndex: Int) -> some View {
+    private func queueRow(_ track: Track, badge: String?) -> some View {
         HStack(spacing: 12) {
-            Text("\(displayIndex)")
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(Color.mmMutedFg)
-                .frame(width: 20, alignment: .center)
-
             ArtworkView(url: track.artworkUrl, size: 44)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -137,9 +162,19 @@ struct QueueView: View {
 
             Spacer()
 
-            Text(formatDuration(track.durationMs))
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(Color.mmMutedFg)
+            if let badge {
+                Text(badge)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.mmMutedFg)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.mmSurface)
+                    .clipShape(Capsule())
+            } else {
+                Text(formatDuration(track.durationMs))
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(Color.mmMutedFg)
+            }
         }
         .padding(8)
     }

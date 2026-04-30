@@ -41,15 +41,37 @@ actor StreamResolver {
     func resolveURL(videoId: String, bypassCache: Bool = false) async throws -> URL {
         if !bypassCache, let entry = cache[videoId],
            Date().timeIntervalSince(entry.resolvedAt) < cacheTTL {
+            print("[SR.resolveURL] memory cache hit videoId=\(videoId)")
             return entry.url
         }
 
+        // Race the backend (which has its own URL cache + parallel extractor pool)
+        // against on-device InnertubeClient. First valid result wins; the loser is
+        // cancelled. This gives us the best of both:
+        //  - Backend cache hit (~80ms RTT) for songs anyone played in the last 5h
+        //  - Backend racing extractor (~500–800ms) for cold songs when youtubei is healthy
+        //  - Local InnertubeClient (~500–900ms) when the backend is unreachable
+        //  - Whichever path wins, we still cache locally so subsequent taps skip the race
+        if !bypassCache {
+            let raceStart = Date()
+            if let url = await raceResolution(videoId: videoId) {
+                print("[SR.resolveURL] raced winner in \(Int(Date().timeIntervalSince(raceStart)*1000))ms videoId=\(videoId)")
+                cache[videoId] = Entry(url: url, resolvedAt: Date())
+                evictIfNeeded()
+                persistToDisk()
+                return url
+            }
+            print("[SR.resolveURL] race failed; falling back to YouTubeKit videoId=\(videoId)")
+        }
+
+        // Last-resort fallback: YouTubeKit. Slow (2–5s) but resilient if both
+        // backend and InnertubeClient have failed (e.g. PoToken regression).
+        let tYTK = Date()
         let yt = YouTube(videoID: videoId)
         do {
             let streams = try await yt.streams
-            // AVPlayer only decodes AAC/m4a natively — filter out Opus/webm streams
-            // that would crash mediaserverd (err=-12860).
             let playable = streams.filterAudioOnly().filter { $0.isNativelyPlayable }
+            print("[SR.resolveURL] YouTubeKit \(streams.count)/\(playable.count) playable in \(Int(Date().timeIntervalSince(tYTK)*1000))ms")
             guard let audio = playable.highestAudioBitrateStream() else {
                 throw ResolveError.noAudioStream
             }
@@ -61,8 +83,51 @@ actor StreamResolver {
         } catch let err as ResolveError {
             throw err
         } catch {
+            print("[SR.resolveURL] YouTubeKit threw: \(error)")
             throw ResolveError.underlying(error)
         }
+    }
+
+    /// Race backend `/stream-url` against on-device `InnertubeClient`.
+    /// Returns the first successful URL or nil if both fail.
+    private func raceResolution(videoId: String) async -> URL? {
+        await withTaskGroup(of: (String, URL?).self) { group in
+            // Backend: cache hit (~80ms) or fresh racing extraction (~500–800ms).
+            // 1.5s timeout matches the worst case where backend has to extract from
+            // scratch with both youtubei and ytdlp racing.
+            group.addTask {
+                do {
+                    let resp = try await BackendClient.shared.fetchStreamURL(
+                        videoId: videoId, timeoutSeconds: 1.5
+                    )
+                    return ("backend(\(resp.source ?? "?"))", URL(string: resp.url))
+                } catch {
+                    return ("backend", nil)
+                }
+            }
+            // Local: focused IOS Innertube call (~500–900ms). Independent of backend.
+            group.addTask {
+                let url = try? await InnertubeClient.shared.fetchAudioStreamURL(videoId: videoId)
+                return ("innertube", url)
+            }
+            for await (source, url) in group {
+                if let url = url {
+                    print("[SR.race] winner=\(source)")
+                    group.cancelAll()
+                    return url
+                }
+                print("[SR.race] \(source) failed/empty")
+            }
+            return nil
+        }
+    }
+
+    private func fetchFromBackend(videoId: String) async throws -> URL {
+        let resp = try await BackendClient.shared.fetchStreamURL(videoId: videoId, timeoutSeconds: 0.2)
+        guard let url = URL(string: resp.url) else {
+            throw ResolveError.noAudioStream
+        }
+        return url
     }
 
     func invalidate(videoId: String) {

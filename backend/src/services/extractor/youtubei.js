@@ -1,49 +1,23 @@
-// Primary extractor. Uses LuanRT/YouTube.js (npm: youtubei.js) in-process.
-// No subprocess, no Python.
-import { Innertube, UniversalCache } from 'youtubei.js'
+// Innertube extractor — delegates to youtube-pool for persistent HTTP/2 connections
+// and parallel client racing (IOS, ANDROID, TV_EMBEDDED). First valid response wins.
+import { ClientType } from 'youtubei.js'
+import * as pool from '../youtube-pool.js'
 
-let yt = null
-let initPromise = null
+export async function init() { await pool.init() }
 
-async function getClient() {
-  if (yt) return yt
-  if (!initPromise) {
-    initPromise = Innertube.create({ cache: new UniversalCache(false), generate_session_locally: true })
-  }
-  yt = await initPromise
-  return yt
-}
-
-export async function init() { await getClient() }
-
-export async function search(query, n = 5) {
-  const client = await getClient()
-  const res = await client.search(query, { type: 'video' })
-  const videos = res.videos ?? res.results ?? []
-  const mapped = []
-  for (const v of videos) {
-    if (mapped.length >= n) break
-    const id = v.id ?? v.video_id
-    if (!id) continue
-    mapped.push({
-      id,
-      title: v.title?.text ?? v.title ?? '',
-      duration: v.duration?.seconds ?? v.length_seconds ?? 0,
-      channel: v.author?.name ?? v.channel?.name ?? '',
-    })
-  }
-  return mapped
-}
+export async function search(query, n = 5) { return pool.search(query, n) }
 
 export async function getStreamUrl(videoId) {
-  const client = await getClient()
-  const info = await client.getInfo(videoId)
-  const format = info.chooseFormat({ type: 'audio', quality: 'best' })
-  if (!format) throw new Error(`no audio format for ${videoId}`)
-  return format.decipher(client.session.player)
+  const { url } = await pool.extract(videoId)
+  return url
 }
 
 export const _internal = {
-  reset() { yt = null; initPromise = null },
-  _setClient(mock) { yt = mock },
+  reset() { pool._internal.reset() },
+  // Insert a mock client as all racing slots so tests that call getStreamUrl work.
+  _setClient(mock) {
+    for (const ct of pool._internal.RACE_CLIENTS) {
+      pool._internal.pool.set(ct, mock)
+    }
+  },
 }

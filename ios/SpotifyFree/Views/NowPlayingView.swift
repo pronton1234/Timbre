@@ -1,5 +1,6 @@
 import SwiftUI
 import MediaPlayer
+import UIKit
 
 // MARK: - MiniPlayerCard
 
@@ -72,6 +73,19 @@ struct MiniPlayerCard: View {
         .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 8)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > abs(dy) else { return }  // horizontal swipe only
+                    if dx < -50 {
+                        Task { await queue.advance(manual: true) }
+                    } else if dx > 50 {
+                        Task { await queue.previous() }
+                    }
+                }
+        )
     }
 }
 
@@ -84,6 +98,8 @@ struct FullPlayerView: View {
 
     @State private var scrubTarget: Double? = nil
     @State private var isLiked = false
+    @State private var lyrics: TrackLyrics? = nil
+    @State private var lyricsLoading = false
 
     var body: some View {
         ZStack {
@@ -100,12 +116,13 @@ struct FullPlayerView: View {
                 titleBlock
                 slider
                 transport
+                lyricsPanel
                 Spacer(minLength: 24)
             }
             .padding(.horizontal, 16)
         }
-        .onAppear { refreshLiked() }
-        .onChange(of: player.currentTrack?.id) { _ in refreshLiked() }
+        .onAppear { refreshLiked(); loadLyrics() }
+        .onChange(of: player.currentTrack?.id) { _ in refreshLiked(); loadLyrics() }
     }
 
     private func refreshLiked() {
@@ -113,6 +130,15 @@ struct FullPlayerView: View {
             isLiked = PersistenceController.shared.isLiked(t)
         } else {
             isLiked = false
+        }
+    }
+
+    private func loadLyrics() {
+        guard let track = player.currentTrack else { lyrics = nil; return }
+        lyricsLoading = true
+        Task {
+            let result = await LyricsClient.shared.fetchLyrics(for: track)
+            await MainActor.run { lyrics = result; lyricsLoading = false }
         }
     }
 
@@ -171,10 +197,21 @@ struct FullPlayerView: View {
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(Color.mmForeground)
                     .lineLimit(2)
-                Text(player.currentTrack?.artistName ?? "")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.mmMutedFg)
-                    .lineLimit(1)
+                // 5.3: tap artist name → ArtistDetailView
+                if let track = player.currentTrack, let artistId = track.artistId {
+                    NavigationLink(value: Artist(itunesArtistId: artistId, name: track.artistName, primaryGenre: nil, artistLinkUrl: nil)) {
+                        Text(track.artistName)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.mmMutedFg)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(player.currentTrack?.artistName ?? "")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.mmMutedFg)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Button { toggleLike() } label: {
@@ -205,9 +242,13 @@ struct FullPlayerView: View {
             .tint(Color.mmForeground)
 
             HStack {
-                Text(format(scrubTarget ?? player.position))
+                // 5.4: left = elapsed (counts up), right = remaining (counts down as -MM:SS)
+                // 5.8: clamp elapsed to [0, duration] so display never goes out of bounds
+                let elapsed = min(max(scrubTarget ?? player.position, 0), max(player.duration, 0))
+                let remaining = max(player.duration - elapsed, 0)
+                Text(format(elapsed))
                 Spacer()
-                Text(format(player.duration))
+                Text("-" + format(remaining))
             }
             .font(.system(size: 11))
             .foregroundStyle(Color.mmMutedFg)
@@ -251,6 +292,54 @@ struct FullPlayerView: View {
             }.buttonStyle(.plain)
         }
         .padding(.vertical, 16)
+    }
+
+    // MARK: - Lyrics panel (5.11)
+
+    @ViewBuilder
+    private var lyricsPanel: some View {
+        if lyricsLoading {
+            ProgressView()
+                .tint(Color.mmMutedFg)
+                .padding(.top, 24)
+        } else if let lyr = lyrics {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("LYRICS")
+                    .font(.system(size: 11, weight: .regular))
+                    .tracking(2)
+                    .foregroundStyle(Color.mmMutedFg)
+                    .padding(.bottom, 12)
+                    .padding(.top, 20)
+
+                if lyr.hasSyncedLines {
+                    // Synced lyrics: highlight current line
+                    let pos = player.position
+                    let currentIdx = lyr.lines.lastIndex { $0.timestamp <= pos } ?? 0
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(lyr.lines.enumerated()), id: \.element.id) { idx, line in
+                                    Text(line.text.isEmpty ? "·" : line.text)
+                                        .font(.system(size: idx == currentIdx ? 17 : 14, weight: idx == currentIdx ? .semibold : .regular))
+                                        .foregroundStyle(idx == currentIdx ? Color.mmForeground : Color.mmMutedFg)
+                                        .animation(.easeInOut(duration: 0.2), value: currentIdx)
+                                        .id(idx)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 200)
+                        .onChange(of: currentIdx) { idx in
+                            withAnimation { proxy.scrollTo(idx, anchor: .center) }
+                        }
+                    }
+                } else {
+                    Text(lyr.plainText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.mmMutedFg)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private func format(_ s: Double) -> String {

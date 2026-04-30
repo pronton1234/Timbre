@@ -37,11 +37,20 @@ function makeBreaker(name) {
   }
 }
 
+// Order matters: extractStream walks this list top-down. youtubei is FIRST
+// because the persistent HTTP/2 pool + parallel client racing in youtube-pool.js
+// gives it ~300–600ms warm latency — an order of magnitude faster than the
+// subprocess-based extractors. ytdlp/piped/cobalt are reliable fallbacks if
+// the IOS Innertube clients get blocked from a particular IP.
+//
+// Per-extractor timeouts reflect their speed envelope: blow past it → kick
+// to the next. Total chain budget on cold-cold is ~3s before all options
+// have been tried.
 const registry = [
-  { name: 'ytdlp', impl: ytdlp, breaker: makeBreaker('ytdlp') },
-  { name: 'piped', impl: piped, breaker: makeBreaker('piped') },
-  { name: 'cobalt', impl: cobalt, breaker: makeBreaker('cobalt') },
-  { name: 'youtubei', impl: youtubei, breaker: makeBreaker('youtubei') },
+  { name: 'youtubei', impl: youtubei, breaker: makeBreaker('youtubei'), timeoutMs: 2_500 },
+  { name: 'ytdlp',    impl: ytdlp,    breaker: makeBreaker('ytdlp'),    timeoutMs: 12_000 },
+  { name: 'piped',    impl: piped,    breaker: makeBreaker('piped'),    timeoutMs: 5_000 },
+  { name: 'cobalt',   impl: cobalt,   breaker: makeBreaker('cobalt'),   timeoutMs: 5_000 },
 ]
 
 function withTimeout(promise, ms) {
@@ -67,22 +76,74 @@ export async function search(query, n = 5) {
 
 export async function extractStream(videoId) {
   let lastErr
+  const t0 = Date.now()
   for (const ex of registry) {
     if (ex.breaker.isOpen()) {
       console.error(`[extractor:${ex.name}] skipped (circuit open) videoId=${videoId}`)
       continue
     }
+    const tEx = Date.now()
     try {
-      const url = await withTimeout(ex.impl.getStreamUrl(videoId), 15_000)
+      const url = await withTimeout(ex.impl.getStreamUrl(videoId), ex.timeoutMs)
       ex.breaker.recordSuccess()
+      console.log(`[extractor:${ex.name}] OK videoId=${videoId} ${Date.now() - tEx}ms (chain ${Date.now() - t0}ms)`)
       return { url, extractor: ex.name }
     } catch (e) {
       ex.breaker.recordFailure()
-      console.error(`[extractor:${ex.name}] failed videoId=${videoId}: ${e.message}`)
+      console.error(`[extractor:${ex.name}] failed videoId=${videoId} after ${Date.now() - tEx}ms: ${e.message}`)
       lastErr = e
     }
   }
   throw lastErr ?? new Error('all extractors failed')
+}
+
+/// Race-extract: fire youtubei AND a slower-but-reliable fallback in parallel.
+/// First valid response wins; the other is abandoned. Used when latency matters
+/// more than minimizing upstream load (i.e. the live /stream-url path).
+///
+/// Why this is safer than just using extractStream sequentially: if youtubei is
+/// going to fail (e.g. PoToken regression on Oracle datacenter IPs), we don't
+/// pay the 2.5s timeout before falling to ytdlp — they raced from the start.
+export async function extractStreamRaced(videoId) {
+  const t0 = Date.now()
+  const candidates = []
+  for (const ex of registry) {
+    if (ex.breaker.isOpen()) continue
+    candidates.push(ex)
+    // Race only first two by default — youtubei (fast) + ytdlp (reliable).
+    // piped/cobalt remain available as last-resort fallbacks via extractStream.
+    if (candidates.length >= 2) break
+  }
+  if (candidates.length === 0) return extractStream(videoId)
+
+  return new Promise((resolve, reject) => {
+    let resolved = false
+    let pending = candidates.length
+    let lastErr
+
+    for (const ex of candidates) {
+      const tEx = Date.now()
+      withTimeout(ex.impl.getStreamUrl(videoId), ex.timeoutMs)
+        .then(url => {
+          ex.breaker.recordSuccess()
+          if (resolved) return
+          resolved = true
+          console.log(`[extractor:race ${ex.name}] WON videoId=${videoId} ${Date.now() - tEx}ms (race ${Date.now() - t0}ms)`)
+          resolve({ url, extractor: ex.name })
+        })
+        .catch(err => {
+          ex.breaker.recordFailure()
+          lastErr = err
+          pending--
+          console.error(`[extractor:race ${ex.name}] failed ${Date.now() - tEx}ms: ${err.message}`)
+          if (resolved) return
+          if (pending === 0) {
+            // Both raced extractors failed — fall back to remaining chain.
+            extractStream(videoId).then(resolve).catch(() => reject(lastErr))
+          }
+        })
+    }
+  })
 }
 
 export function health() {

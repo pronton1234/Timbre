@@ -84,7 +84,7 @@ struct AlbumDetailView: View {
     private var actionRow: some View {
         HStack(spacing: 10) {
             Button {
-                Task { await QueueManager.shared.playNow(tracks) }
+                Task { await QueueManager.shared.playNow(tracks, kind: .album(album)) }
             } label: {
                 Text("Play")
                     .font(AppTheme.text(14, weight: .semibold))
@@ -126,7 +126,7 @@ struct AlbumDetailView: View {
                         track: t,
                         index: idx + 1,
                         showArtwork: false,
-                        onTap: { Task { await QueueManager.shared.playNow(tracks, startAt: idx) } },
+                        onTap: { Task { await QueueManager.shared.playNow(tracks, startAt: idx, kind: .album(album)) } },
                         onAddToQueue: { QueueManager.shared.addToQueue(t) }
                     )
                     .padding(.vertical, 8)
