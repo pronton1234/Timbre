@@ -23,6 +23,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 	</dict>
+	<key>SEARCH_BACKEND_URL</key>
+	<string>$(SEARCH_BACKEND_URL)</string>
 	<key>SPOTIFY_FREE_BACKEND_URL</key>
 	<string>$(SPOTIFY_FREE_BACKEND_URL)</string>
 	<key>UIAppFonts</key>

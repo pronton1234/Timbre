@@ -41,6 +41,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
         SPOTIFY_FREE_BACKEND_URL: "$(SPOTIFY_FREE_BACKEND_URL)"
+        SEARCH_BACKEND_URL: "$(SEARCH_BACKEND_URL)"
         UIAppFonts:
           - Fonts/InstrumentSerif-Regular.ttf
           - Fonts/DMSerifDisplay-Regular.ttf
@@ -56,8 +57,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.spotifyfree.SpotifyFree
         INFOPLIST_FILE: SpotifyFree/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: SpotifyFree/Resources/SpotifyFree.entitlements
-        # Production backend. Override per-scheme via xcconfig if doing local dev.
+        # Production backend (Node: resolve/play/stream). Override per-scheme via xcconfig for local dev.
         SPOTIFY_FREE_BACKEND_URL: "https://free-spotify.duckdns.org"
+        # Python semantic-search service (POST /search). Point this at wherever the
+        # :8000 service is exposed (e.g. an nginx location proxying to 127.0.0.1:8000).
+        # Local dev: override to http://localhost:8000 via an xcconfig.
+        SEARCH_BACKEND_URL: "https://free-spotify.duckdns.org/search-api"
     dependencies:
       - package: YouTubeKit
 

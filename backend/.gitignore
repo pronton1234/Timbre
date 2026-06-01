@@ -1,7 +1,8 @@
-node_modules
-cache.db
-cache.db-journal
-cache.db-shm
-cache.db-wal
+__pycache__/
+*.py[cod]
+.venv/
+venv/
 .env
-*.log
+.pytest_cache/
+*.egg-info/
+.mypy_cache/

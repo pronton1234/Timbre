@@ -1,7 +1,11 @@
 import Foundation
 
-/// Calls the backend `/search` endpoint.
-/// Falls back to the iTunes client if the backend is unreachable.
+/// Track search now goes to the Python semantic-search backend (`POST /search`,
+/// `SEARCH_BACKEND_URL`): a ranked pool of YouTube videoIds. The new backend
+/// returns tracks only, so albums/artists still come from iTunes (concurrently).
+/// If the search backend is unreachable, we fall back to iTunes track search.
+///
+/// `artistTopTracks` still hits the Node backend (`SPOTIFY_FREE_BACKEND_URL`).
 actor SearchService {
     static let shared = SearchService()
 
@@ -11,37 +15,59 @@ actor SearchService {
         var artists: [Artist] = []
     }
 
-    private let baseURL: URL
+    private let baseURL: URL        // Node backend (artist-top-tracks)
+    private let searchURL: URL      // Python semantic-search backend
     private let session: URLSession
     private let itunesClient = iTunesClient.shared
 
     init(session: URLSession = .shared) {
         self.session = session
-        let fromPlist = Bundle.main.object(forInfoDictionaryKey: "SPOTIFY_FREE_BACKEND_URL") as? String
-        let raw = (fromPlist?.isEmpty == false ? fromPlist! : "http://localhost:3000")
-        self.baseURL = URL(string: raw) ?? URL(string: "http://localhost:3000")!
+        self.baseURL = Self.url(forKey: "SPOTIFY_FREE_BACKEND_URL", fallback: "http://localhost:3000")
+        self.searchURL = Self.url(forKey: "SEARCH_BACKEND_URL", fallback: "http://localhost:8000")
+    }
+
+    private static func url(forKey key: String, fallback: String) -> URL {
+        let fromPlist = Bundle.main.object(forInfoDictionaryKey: key) as? String
+        let raw = (fromPlist?.isEmpty == false ? fromPlist! : fallback)
+        return URL(string: raw) ?? URL(string: fallback)!
     }
 
     func search(_ term: String) async -> SearchResults {
-        var comps = URLComponents(url: baseURL.appendingPathComponent("search"), resolvingAgainstBaseURL: false)!
-        comps.queryItems = [URLQueryItem(name: "q", value: term), URLQueryItem(name: "limit", value: "25")]
-        guard let url = comps.url else { return await fallback(term) }
+        // Tracks from the semantic backend; albums/artists from iTunes — in parallel.
+        async let semanticTracks = semanticSearch(term)
+        async let albums = (try? await itunesClient.searchAlbums(term)) ?? []
+        async let artists = (try? await itunesClient.searchArtists(term)) ?? []
 
+        let tracks: [Track]
+        if let semantic = await semanticTracks, !semantic.isEmpty {
+            tracks = semantic
+        } else {
+            // Backend down or empty — fall back to iTunes track search.
+            tracks = (try? await itunesClient.searchTracks(term)) ?? []
+        }
+        return SearchResults(tracks: tracks, albums: await albums, artists: await artists)
+    }
+
+    /// POST /search to the Python backend. Returns nil on any failure so the
+    /// caller can fall back to iTunes; an empty array means "reached it, no hits".
+    private func semanticSearch(_ term: String) async -> [Track]? {
+        let url = searchURL.appendingPathComponent("search")
         do {
-            var req = URLRequest(url: url, timeoutInterval: 5)
+            // 12s: a cold semantic query (LLM understand + adapter fan-out) can
+            // run several seconds; too tight a timeout silently drops to iTunes.
+            var req = URLRequest(url: url, timeoutInterval: 12)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.httpBody = try JSONEncoder().encode(SearchQuery(query: term, top_k: 10))
             let (data, resp) = try await session.data(for: req)
             guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                return await fallback(term)
+                return nil
             }
-            let decoded = try JSONDecoder().decode(BackendSearchResponse.self, from: data)
-            return SearchResults(
-                tracks: decoded.tracks.compactMap(mapTrack),
-                albums: decoded.albums.compactMap(mapAlbum),
-                artists: decoded.artists.compactMap(mapArtist)
-            )
+            let decoded = try JSONDecoder().decode(SemanticSearchResponse.self, from: data)
+            return decoded.results.compactMap(mapSemanticTrack)
         } catch {
-            return await fallback(term)
+            return nil
         }
     }
 
@@ -65,23 +91,61 @@ actor SearchService {
         }
     }
 
-    // MARK: - Fallback
+    // MARK: - Semantic-search decoding (Python backend)
 
-    private func fallback(_ term: String) async -> SearchResults {
-        async let t  = (try? await itunesClient.searchTracks(term))  ?? []
-        async let al = (try? await itunesClient.searchAlbums(term))  ?? []
-        async let ar = (try? await itunesClient.searchArtists(term)) ?? []
-        let (tv, av, arv) = await (t, al, ar)
-        return SearchResults(tracks: tv, albums: av, artists: arv)
+    private struct SearchQuery: Encodable {
+        let query: String
+        let top_k: Int
     }
 
-    // MARK: - Decoding
-
-    private struct BackendSearchResponse: Decodable {
-        let tracks: [BackendTrack]
-        let albums: [BackendAlbum]
-        let artists: [BackendArtist]
+    private struct SemanticSearchResponse: Decodable {
+        let results: [SemanticTrack]
     }
+
+    private struct SemanticTrack: Decodable {
+        let track_id: String
+        let title: String
+        let artist: String
+        let album: String?
+        let duration_sec: Int?
+        let video_id: String
+        let source_kind: String?
+        let score: Double?
+    }
+
+    /// The semantic backend returns no iTunes id or artwork — only a videoId.
+    /// Mirror the app's existing YouTube-result convention: a stable *negative*
+    /// pseudo-id derived from the videoId (so it never collides with real iTunes
+    /// ids, and `SearchView` shows the "YT" badge + gradient artwork). Playback
+    /// uses `videoId` directly.
+    private func mapSemanticTrack(_ s: SemanticTrack) -> Track? {
+        guard !s.video_id.isEmpty else { return nil }
+        return Track(
+            itunesTrackId: Self.ytPseudoId(s.video_id),
+            isrc: nil,
+            name: s.title,
+            artistName: s.artist,
+            artistId: nil,
+            albumName: s.album,
+            albumId: nil,
+            durationMs: (s.duration_sec ?? 0) * 1000,
+            artworkUrl: nil,
+            previewUrl: nil,
+            videoId: s.video_id
+        )
+    }
+
+    /// Stable negative Int id from a videoId (djb2). Matches the old Node
+    /// backend's `ytPseudoId` so YT-only results keep a consistent identity.
+    static func ytPseudoId(_ videoId: String) -> Int {
+        var h = 5381
+        for u in videoId.unicodeScalars {
+            h = ((h &* 33) ^ Int(u.value)) & 0x7fffffff
+        }
+        return -h
+    }
+
+    // MARK: - Node artist-top-tracks decoding
 
     private struct BackendTracksResponse: Decodable {
         let tracks: [BackendTrack]
@@ -102,23 +166,6 @@ actor SearchService {
         let source: String?
     }
 
-    private struct BackendAlbum: Decodable {
-        let itunesCollectionId: Int
-        let name: String
-        let artistName: String
-        let artistId: Int?
-        let artworkUrl: String?
-        let trackCount: Int?
-        let releaseDate: String?
-    }
-
-    private struct BackendArtist: Decodable {
-        let itunesArtistId: Int
-        let name: String
-        let primaryGenre: String?
-        let artistLinkUrl: String?
-    }
-
     private func mapTrack(_ b: BackendTrack) -> Track? {
         Track(
             itunesTrackId: b.itunesTrackId,
@@ -132,27 +179,6 @@ actor SearchService {
             artworkUrl: b.artworkUrl.flatMap { URL(string: $0) },
             previewUrl: b.previewUrl.flatMap { URL(string: $0) },
             videoId: b.videoId
-        )
-    }
-
-    private func mapAlbum(_ b: BackendAlbum) -> Album? {
-        Album(
-            itunesCollectionId: b.itunesCollectionId,
-            name: b.name,
-            artistName: b.artistName,
-            artistId: b.artistId,
-            artworkUrl: b.artworkUrl.flatMap { URL(string: $0) },
-            trackCount: b.trackCount,
-            releaseDate: nil
-        )
-    }
-
-    private func mapArtist(_ b: BackendArtist) -> Artist? {
-        Artist(
-            itunesArtistId: b.itunesArtistId,
-            name: b.name,
-            primaryGenre: b.primaryGenre,
-            artistLinkUrl: b.artistLinkUrl.flatMap { URL(string: $0) }
         )
     }
 }

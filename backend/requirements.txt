@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+alembic
+psycopg[binary]
+pgvector
+redis
+pydantic-settings
+ytmusicapi
+yt-dlp
+exa-py
+anthropic
+fastembed
+pytest
+pytest-asyncio
+httpx

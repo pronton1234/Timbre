@@ -7,6 +7,7 @@ struct SearchView: View {
     @State private var results = SearchService.SearchResults()
     @State private var isSearching = false
     @State private var debounceTask: Task<Void, Never>?
+    @State private var searchTask: Task<Void, Never>?
     @State private var recentSearches: [String] = SearchView.loadRecents()
     @State private var selectedTab: SearchTab = .top
 
@@ -329,10 +330,18 @@ struct SearchView: View {
     private func runSearch() {
         let q = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { results = SearchService.SearchResults(); return }
+        // Cancel any in-flight search so a slow earlier request can't land late
+        // and overwrite the results for the query the user is actually on.
+        searchTask?.cancel()
         isSearching = true
-        Task {
+        searchTask = Task {
             let r = await SearchService.shared.search(q)
             await MainActor.run {
+                // Stale-response guard: only apply if this is still the current
+                // query. `onSubmit` + debounce can race for the same term, and
+                // out-of-order backend responses must never replace newer results.
+                guard !Task.isCancelled,
+                      q == term.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
                 results = r
                 isSearching = false
                 // Fire prefetch for top tracks so they're warm by the time user taps

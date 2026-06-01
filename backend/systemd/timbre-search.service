@@ -1,0 +1,41 @@
+# Timbre Python semantic-search service (FastAPI/uvicorn) — runs 24/7.
+#
+# IMPORTANT: deploy this service to its OWN directory, NOT the Node backend's
+# dir. The Node backend (playback: /resolve, /play, /stream-url, /prefetch,
+# /artist-top-tracks) stays exactly where it is, on its own port + unit.
+#
+#   Node    : /home/ubuntu/spotify-free/backend   :3000   spotify-free-backend.service  (UNTOUCHED)
+#   Python  : /home/ubuntu/timbre-search          :8000   timbre-search.service         (this file)
+#
+# Install:
+#   sudo cp timbre-search.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now timbre-search
+#   journalctl -u timbre-search -f
+#
+# Adjust WorkingDirectory / ExecStart paths to match where you actually put the
+# Python service + its venv on the VM.
+
+[Unit]
+Description=Timbre semantic-search backend (FastAPI)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/timbre-search
+# pydantic-settings reads .env from WorkingDirectory; keep .env there (chmod 600).
+ExecStart=/home/ubuntu/timbre-search/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Light hardening only. We deliberately do NOT set ProtectHome=read-only:
+# fastembed caches its ONNX model under ~/.cache/fastembed and must be able to
+# write it (downloaded once, then reused across restarts).
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
